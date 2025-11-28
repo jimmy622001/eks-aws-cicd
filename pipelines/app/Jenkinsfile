@@ -1,0 +1,166 @@
+pipeline {
+    agent {
+        kubernetes {
+            yaml '''
+            apiVersion: v1
+            kind: Pod
+            spec:
+              containers:
+              - name: docker
+                image: docker:20.10.16-dind
+                securityContext:
+                  privileged: true
+                volumeMounts:
+                - name: dind-storage
+                  mountPath: /var/lib/docker
+              - name: kubectl
+                image: bitnami/kubectl:latest
+                command:
+                - cat
+                tty: true
+                volumeMounts:
+                - name: aws-creds
+                  mountPath: /root/.aws
+              - name: aws
+                image: amazon/aws-cli
+                command:
+                - cat
+                tty: true
+                volumeMounts:
+                - name: aws-creds
+                  mountPath: /root/.aws
+              volumes:
+              - name: dind-storage
+                emptyDir: {}
+              - name: aws-creds
+                secret:
+                  secretName: aws-credentials
+            '''
+        }
+    }
+    
+    parameters {
+        choice(name: 'ENVIRONMENT', choices: ['dev', 'prod', 'dr'], description: 'Select environment to deploy')
+    }
+    
+    environment {
+        AWS_ACCOUNT_ID = credentials('aws-account-id')
+        IMAGE_TAG = "${BUILD_NUMBER}-${GIT_COMMIT.substring(0,7)}"
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('Configure AWS CLI') {
+            steps {
+                container('aws') {
+                    script {
+                        def region = params.ENVIRONMENT == 'dr' ? 'us-east-1' : 'us-west-2'
+                        sh "aws configure set region ${region}"
+                    }
+                }
+            }
+        }
+        
+        stage('Create ECR Repository if not exists') {
+            steps {
+                container('aws') {
+                    script {
+                        def region = params.ENVIRONMENT == 'dr' ? 'us-east-1' : 'us-west-2'
+                        def ecrRepoName = "sample-app-${params.ENVIRONMENT}"
+                        
+                        sh """
+                        aws ecr describe-repositories --repository-names ${ecrRepoName} || \
+                        aws ecr create-repository --repository-name ${ecrRepoName} --region ${region}
+                        """
+                        
+                        // Set the ECR repository URI
+                        env.ECR_REPOSITORY_URI = "${AWS_ACCOUNT_ID}.dkr.ecr.${region}.amazonaws.com/${ecrRepoName}"
+                    }
+                }
+            }
+        }
+        
+        stage('Build and Push Docker Image') {
+            steps {
+                container('docker') {
+                    script {
+                        def region = params.ENVIRONMENT == 'dr' ? 'us-east-1' : 'us-west-2'
+                        
+                        sh """
+                        aws ecr get-login-password --region ${region} | docker login --username AWS --password-stdin ${ECR_REPOSITORY_URI}
+                        cd app
+                        docker build -t ${ECR_REPOSITORY_URI}:${IMAGE_TAG} .
+                        docker push ${ECR_REPOSITORY_URI}:${IMAGE_TAG}
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Update Kubeconfig') {
+            steps {
+                container('kubectl') {
+                    script {
+                        def region = params.ENVIRONMENT == 'dr' ? 'us-east-1' : 'us-west-2'
+                        def clusterName = params.ENVIRONMENT == 'dr' ? 'eks-jenkins-bit-dr' : "eks-jenkins-bit-${params.ENVIRONMENT}"
+                        
+                        sh "aws eks --region ${region} update-kubeconfig --name ${clusterName}"
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy to Kubernetes') {
+            steps {
+                container('kubectl') {
+                    script {
+                        // Replace placeholders in deployment file
+                        sh """
+                        sed -e 's|\\\${ECR_REPOSITORY_URI}|${ECR_REPOSITORY_URI}|g' \\
+                            -e 's|\\\${IMAGE_TAG}|${IMAGE_TAG}|g' \\
+                            -e 's|\\\${ENVIRONMENT}|${params.ENVIRONMENT}|g' \\
+                            app/kubernetes/deployment.yaml > deployment.yaml
+                        
+                        kubectl apply -f deployment.yaml
+                        """
+                        
+                        // Wait for deployment to complete
+                        sh "kubectl rollout status deployment/sample-app"
+                    }
+                }
+            }
+        }
+        
+        stage('Get Service URL') {
+            steps {
+                container('kubectl') {
+                    script {
+                        sh """
+                        echo "Waiting for LoadBalancer to be ready..."
+                        sleep 30
+                        kubectl get service sample-app-service
+                        """
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo "Application successfully deployed to ${params.ENVIRONMENT}"
+        }
+        failure {
+            echo "Deployment to ${params.ENVIRONMENT} failed"
+        }
+        always {
+            echo 'Cleaning up workspace'
+            cleanWs()
+        }
+    }
+}

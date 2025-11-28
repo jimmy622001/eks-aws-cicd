@@ -1,0 +1,108 @@
+pipeline {
+    agent {
+        kubernetes {
+            yaml '''
+            apiVersion: v1
+            kind: Pod
+            spec:
+              containers:
+              - name: terraform
+                image: hashicorp/terraform:1.2.0
+                command:
+                - cat
+                tty: true
+                volumeMounts:
+                - name: aws-creds
+                  mountPath: /root/.aws
+              volumes:
+              - name: aws-creds
+                secret:
+                  secretName: aws-credentials
+            '''
+        }
+    }
+    
+    parameters {
+        choice(name: 'ENVIRONMENT', choices: ['dev', 'prod', 'dr'], description: 'Select environment to deploy')
+        choice(name: 'ACTION', choices: ['plan', 'apply', 'destroy'], description: 'Terraform action to perform')
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('Initialize Terraform') {
+            steps {
+                container('terraform') {
+                    dir("environments/${params.ENVIRONMENT}") {
+                        sh 'terraform init'
+                    }
+                }
+            }
+        }
+        
+        stage('Terraform Plan') {
+            when {
+                expression { params.ACTION == 'plan' || params.ACTION == 'apply' }
+            }
+            steps {
+                container('terraform') {
+                    dir("environments/${params.ENVIRONMENT}") {
+                        sh 'terraform plan -out=tfplan'
+                    }
+                }
+            }
+        }
+        
+        stage('Approval') {
+            when {
+                expression { params.ACTION == 'apply' || params.ACTION == 'destroy' }
+            }
+            steps {
+                script {
+                    if (params.ENVIRONMENT == 'prod' || params.ENVIRONMENT == 'dr') {
+                        timeout(time: 1, unit: 'HOURS') {
+                            input message: "Do you want to ${params.ACTION} the infrastructure in ${params.ENVIRONMENT}?"
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Terraform Apply') {
+            when {
+                expression { params.ACTION == 'apply' }
+            }
+            steps {
+                container('terraform') {
+                    dir("environments/${params.ENVIRONMENT}") {
+                        sh 'terraform apply -auto-approve tfplan'
+                    }
+                }
+            }
+        }
+        
+        stage('Terraform Destroy') {
+            when {
+                expression { params.ACTION == 'destroy' }
+            }
+            steps {
+                container('terraform') {
+                    dir("environments/${params.ENVIRONMENT}") {
+                        sh 'terraform destroy -auto-approve'
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            echo 'Cleaning up workspace'
+            cleanWs()
+        }
+    }
+}

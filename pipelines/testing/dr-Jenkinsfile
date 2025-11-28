@@ -1,0 +1,154 @@
+pipeline {
+    agent any
+    
+    parameters {
+        choice(name: 'ENVIRONMENT', choices: ['dev', 'stage', 'prod'], description: 'Environment to run the DR test in')
+        string(name: 'PRIMARY_REGION', defaultValue: 'us-east-1', description: 'Primary AWS region')
+        string(name: 'DR_REGION', defaultValue: 'us-west-2', description: 'DR AWS region')
+        booleanParam(name: 'ENABLE_NETWORK_DISRUPTION', defaultValue: false, description: 'Enable network disruption testing')
+        string(name: 'TEST_TIMEOUT_MINUTES', defaultValue: '30', description: 'Maximum test duration in minutes')
+        string(name: 'TARGET_RPO_SECONDS', defaultValue: '300', description: 'Target Recovery Point Objective in seconds')
+        string(name: 'TARGET_RTO_MINUTES', defaultValue: '15', description: 'Target Recovery Time Objective in minutes')
+        booleanParam(name: 'CLEANUP_AFTER_TEST', defaultValue: true, description: 'Destroy all test resources after running')
+    }
+
+    environment {
+        TF_VAR_environment = "${params.ENVIRONMENT}"
+        TF_VAR_primary_region = "${params.PRIMARY_REGION}"
+        TF_VAR_dr_region = "${params.DR_REGION}"
+        TF_VAR_enable_network_disruption_test = "${params.ENABLE_NETWORK_DISRUPTION}"
+        TF_VAR_test_timeout_minutes = "${params.TEST_TIMEOUT_MINUTES}"
+        TF_VAR_target_rpo_seconds = "${params.TARGET_RPO_SECONDS}"
+        TF_VAR_target_rto_minutes = "${params.TARGET_RTO_MINUTES}"
+    }
+    
+    stages {
+        stage('Preparation') {
+            steps {
+                echo 'Preparing for DR testing...'
+                sh 'aws configure set region ${TF_VAR_primary_region}'
+                dir("environments/${params.ENVIRONMENT}") {
+                    sh 'terraform init'
+                }
+            }
+        }
+        
+        stage('Uncomment DR Testing Module') {
+            steps {
+                echo 'Uncommenting DR testing module in the config...'
+                script {
+                    // Using sed to uncomment the DR testing module in testing.tf
+                    sh """
+                    cd environments/${params.ENVIRONMENT}
+                    cp testing.tf testing.tf.bak
+                    sed -i 's/\\/\\*\\n# Disaster Recovery (Reliability) Testing Module/# Disaster Recovery (Reliability) Testing Module/g' testing.tf
+                    sed -i 's/\\*\\//# End of DR Testing Module/g' testing.tf
+                    """
+                }
+            }
+        }
+        
+        stage('Plan DR Testing') {
+            steps {
+                echo 'Planning DR test infrastructure...'
+                dir("environments/${params.ENVIRONMENT}") {
+                    sh 'terraform plan -target=module.dr_testing -out=dr-testing-plan.tfplan'
+                }
+            }
+        }
+        
+        stage('Apply DR Testing Infrastructure') {
+            steps {
+                echo 'Deploying DR testing infrastructure...'
+                dir("environments/${params.ENVIRONMENT}") {
+                    sh 'terraform apply "dr-testing-plan.tfplan"'
+                }
+            }
+        }
+        
+        stage('Run DR Tests') {
+            steps {
+                echo 'Running DR tests...'
+                sh '''
+                # Execute DR tests by invoking the FIS experiment
+                aws fis start-experiment --experiment-template-id $(terraform output -raw dr_test_template_id) \\
+                --tags Project=${TF_VAR_environment}-${JOB_NAME}-${BUILD_NUMBER}
+                
+                # Wait for the test to complete
+                sleep 30
+                
+                # Get experiment ID from the most recent experiment
+                EXPERIMENT_ID=$(aws fis list-experiments --query "experiments[0].id" --output text)
+                
+                # Wait for experiment to complete
+                aws fis wait experiment-completed --id $EXPERIMENT_ID
+                
+                # Get the test results
+                aws lambda invoke --function-name ${TF_VAR_environment}-rpo-validator \\
+                    --payload '{"testId": "'$EXPERIMENT_ID'"}' rpo-results.json
+                
+                aws lambda invoke --function-name ${TF_VAR_environment}-rto-validator \\
+                    --payload '{"testId": "'$EXPERIMENT_ID'"}' rto-results.json
+                
+                cat rpo-results.json
+                cat rto-results.json
+                '''
+            }
+        }
+        
+        stage('Generate Report') {
+            steps {
+                echo 'Generating DR test report...'
+                sh '''
+                # Generate a simple report from the test results
+                echo "DR Test Report" > dr-test-report.txt
+                echo "==============" >> dr-test-report.txt
+                echo "" >> dr-test-report.txt
+                echo "Environment: ${TF_VAR_environment}" >> dr-test-report.txt
+                echo "Primary Region: ${TF_VAR_primary_region}" >> dr-test-report.txt
+                echo "DR Region: ${TF_VAR_dr_region}" >> dr-test-report.txt
+                echo "Test Date: $(date)" >> dr-test-report.txt
+                echo "" >> dr-test-report.txt
+                echo "RPO Results:" >> dr-test-report.txt
+                cat rpo-results.json >> dr-test-report.txt
+                echo "" >> dr-test-report.txt
+                echo "RTO Results:" >> dr-test-report.txt
+                cat rto-results.json >> dr-test-report.txt
+                
+                cat dr-test-report.txt
+                '''
+                
+                archiveArtifacts artifacts: 'dr-test-report.txt', allowEmptyArchive: true
+            }
+        }
+        
+        stage('Cleanup') {
+            when {
+                expression { return params.CLEANUP_AFTER_TEST }
+            }
+            steps {
+                echo 'Cleaning up DR test resources...'
+                dir("environments/${params.ENVIRONMENT}") {
+                    sh 'terraform destroy -target=module.dr_testing -auto-approve'
+                    sh 'cp testing.tf.bak testing.tf'
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            echo 'DR testing pipeline completed'
+        }
+        success {
+            echo 'DR tests completed successfully!'
+        }
+        failure {
+            echo 'DR tests failed! Check logs for details.'
+        }
+        cleanup {
+            echo 'Cleaning up workspace...'
+            cleanWs()
+        }
+    }
+}

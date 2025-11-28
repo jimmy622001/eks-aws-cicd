@@ -1,0 +1,166 @@
+pipeline {
+    agent {
+        kubernetes {
+            yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: security-testing
+spec:
+  containers:
+  - name: terraform
+    image: hashicorp/terraform:1.3.0
+    command:
+    - cat
+    tty: true
+    volumeMounts:
+    - name: aws-creds
+      mountPath: /root/.aws
+  - name: aws-cli
+    image: amazon/aws-cli:latest
+    command:
+    - cat
+    tty: true
+    volumeMounts:
+    - name: aws-creds
+      mountPath: /root/.aws
+  - name: kubectl
+    image: bitnami/kubectl:latest
+    command:
+    - cat
+    tty: true
+  volumes:
+  - name: aws-creds
+    secret:
+      secretName: aws-credentials
+"""
+        }
+    }
+    
+    parameters {
+        choice(name: 'ENVIRONMENT', choices: ['dev', 'prod'], description: 'Which environment to run security tests against')
+        booleanParam(name: 'RUN_GUARDDUTY_TESTS', defaultValue: true, description: 'Run GuardDuty security tests')
+        booleanParam(name: 'RUN_CONFIG_TESTS', defaultValue: true, description: 'Run AWS Config compliance tests')
+        booleanParam(name: 'RUN_IAM_TESTS', defaultValue: true, description: 'Run IAM security tests')
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('Initialize') {
+            steps {
+                container('terraform') {
+                    dir("environments/${params.ENVIRONMENT}") {
+                        sh 'terraform init'
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy Security Testing Resources') {
+            steps {
+                container('terraform') {
+                    dir("environments/${params.ENVIRONMENT}") {
+                        sh 'terraform apply -target=module.security_testing -auto-approve'
+                    }
+                }
+            }
+        }
+        
+        stage('Run Security Scans') {
+            parallel {
+                stage('GuardDuty Scan') {
+                    when {
+                        expression { return params.RUN_GUARDDUTY_TESTS }
+                    }
+                    steps {
+                        container('aws-cli') {
+                            script {
+                                def functionName = "eks-jenkins-security-scanner-${params.ENVIRONMENT}"
+                                sh "aws lambda invoke --function-name ${functionName} --invocation-type RequestResponse --payload '{\"scanType\":\"guardduty\"}' guardduty-response.json"
+                                sh "cat guardduty-response.json"
+                            }
+                        }
+                    }
+                }
+                
+                stage('Config Compliance Scan') {
+                    when {
+                        expression { return params.RUN_CONFIG_TESTS }
+                    }
+                    steps {
+                        container('aws-cli') {
+                            script {
+                                def functionName = "eks-jenkins-security-scanner-${params.ENVIRONMENT}"
+                                sh "aws lambda invoke --function-name ${functionName} --invocation-type RequestResponse --payload '{\"scanType\":\"config\"}' config-response.json"
+                                sh "cat config-response.json"
+                            }
+                        }
+                    }
+                }
+                
+                stage('IAM Security Scan') {
+                    when {
+                        expression { return params.RUN_IAM_TESTS }
+                    }
+                    steps {
+                        container('aws-cli') {
+                            script {
+                                def functionName = "eks-jenkins-security-scanner-${params.ENVIRONMENT}"
+                                sh "aws lambda invoke --function-name ${functionName} --invocation-type RequestResponse --payload '{\"scanType\":\"iam\"}' iam-response.json"
+                                sh "cat iam-response.json"
+                            }
+                        }
+                    }
+                }
+                
+                stage('VPC Flow Log Analysis') {
+                    steps {
+                        container('aws-cli') {
+                            script {
+                                def functionName = "eks-jenkins-security-scanner-${params.ENVIRONMENT}"
+                                sh "aws lambda invoke --function-name ${functionName} --invocation-type RequestResponse --payload '{\"scanType\":\"vpc-flow\"}' vpc-flow-response.json"
+                                sh "cat vpc-flow-response.json"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Generate Security Report') {
+            steps {
+                container('aws-cli') {
+                    script {
+                        def functionName = "eks-jenkins-security-reporter-${params.ENVIRONMENT}"
+                        sh "aws lambda invoke --function-name ${functionName} --invocation-type RequestResponse --payload '{}' security-report.json"
+                        sh "cat security-report.json"
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            echo 'Cleaning up security testing resources...'
+            container('terraform') {
+                dir("environments/${params.ENVIRONMENT}") {
+                    sh 'terraform destroy -target=module.security_testing -auto-approve'
+                }
+            }
+            cleanWs()
+        }
+        success {
+            echo 'Security testing completed successfully!'
+        }
+        failure {
+            echo 'Security testing failed. Check logs for details.'
+        }
+    }
+}
