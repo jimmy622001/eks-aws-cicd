@@ -38,7 +38,6 @@ resource "aws_ce_anomaly_monitor" "cost_anomaly_monitor" {
 
 resource "aws_ce_anomaly_subscription" "cost_anomaly_subscription" {
   name             = "${var.project_name}-${var.environment}-cost-anomaly-subscription"
-  threshold        = var.cost_anomaly_threshold
   frequency        = "DAILY"
   monitor_arn_list = [aws_ce_anomaly_monitor.cost_anomaly_monitor.arn]
 
