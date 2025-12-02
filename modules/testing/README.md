@@ -81,4 +81,19 @@ This testing module is designed to align with:
 - AWS Security Best Practices
 - AWS Disaster Recovery approaches (Backup & Restore, Pilot Light, Warm Standby, Multi-Site)
 
+## Quick Start
+
+For new users, here are the most common commands to get started with testing:
+
+1. Run the compliance test pipeline:
+   ```bash
+   cd pipelines/testing/compliance
+   ./run-compliance-tests.sh
+Run the disaster recovery test pipeline:
+cd pipelines/testing/dr
+./run-dr-pipeline.sh
+View test results:
+./generate-report.sh
+open reports/latest-report.html
+For detailed usage instructions, refer to the USAGE.md document.
 For detailed usage instructions, please refer to the USAGE.md document.
