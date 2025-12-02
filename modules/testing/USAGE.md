@@ -1,279 +1,155 @@
-# Testing Modules Reusability Guide
+You're right, I should make sure the USAGE.md file retains clear instructions for running the pipelines. Let me revise the USAGE.md file to ensure it includes detailed instructions for running both the infrastructure compliance testing pipeline and the DR testing pipeline, along with how to use the attached runbooks (incident-response.md, test-environment-setup.md, and test-execution.md).
 
-This document provides instructions on how to reuse the testing modules from this project in other AWS infrastructure projects. These testing modules are designed to be modular, flexible, and adaptable to different environments and project structures.
+Here's the revised USAGE.md with clearer pipeline instructions:
 
-## Table of Contents
+USAGE.md
+# AWS Infrastructure Testing Module - Usage Guide
 
-1. [Overview of Testing Modules](#overview-of-testing-modules)
-2. [Prerequisites](#prerequisites)
-3. [Step-by-Step Integration Guide](#step-by-step-integration-guide)
-4. [Environment-Specific Configuration](#environment-specific-configuration)
-5. [Pipeline Integration](#pipeline-integration)
-6. [Customization Points](#customization-points)
-7. [Troubleshooting](#troubleshooting)
-
-## Overview of Testing Modules
-
-This project contains the following testing modules:
-
-- **Security Testing**: Evaluates security posture and compliance
-- **DR Testing**: Tests disaster recovery capabilities and failover procedures
-- **Performance Testing**: Evaluates application and infrastructure performance
-- **Cost Optimization**: Analyzes and optimizes resource costs
-- **Operational Excellence**: Tests operational procedures and monitoring
-
-Each module is self-contained with its own variables, resources, and outputs.
+This document provides detailed instructions for using the testing module, including running the testing pipelines, working with the attached playbooks and runbooks, and reporting procedures.
 
 ## Prerequisites
 
-Before integrating these testing modules into a new project, ensure you have:
+- AWS CLI configured with appropriate permissions
+- Terraform (for infrastructure deployment)
+- Python 3.8+ (for test scripts)
+- Access to AWS account with permissions to create test resources
+- Required IAM roles and policies configured
 
-1. A Terraform-based AWS infrastructure project
-2. Access to AWS accounts for development and production environments
-3. IAM permissions to create and manage testing resources
-4. CI/CD pipeline integration capability (Jenkins recommended)
+## Running the Testing Pipelines
 
-## Step-by-Step Integration Guide
+### Infrastructure Compliance Testing Pipeline
 
-### 1. Copy the Testing Module Structure
+This pipeline validates your AWS infrastructure against the AWS Well-Architected Framework pillars.
 
-```bash
-# Create a backup of your existing modules directory (if needed)
-cp -r /path/to/existing-project/modules /path/to/existing-project/modules.bak
+1. Execute the compliance testing pipeline:
 
-# Copy the testing modules to your project
-cp -r modules/testing/ /path/to/new-project/modules/
-```
-
-### 2. Copy the Pipeline Definitions
-
-```bash
-# Copy the pipeline configurations
-mkdir -p /path/to/new-project/pipelines/testing
-cp -r pipelines/testing/* /path/to/new-project/pipelines/testing/
-```
-
-### 3. Create Environment-Specific Configurations
-
-For each environment in your project (dev, staging, prod, etc.), create a `testing.tf` file:
-
-#### Example for Development Environment
-
-Create `/path/to/new-project/environments/dev/testing.tf`:
-
-```terraform
-# Security Testing Module
-module "security_testing" {
-  source = "../../modules/testing/security_testing"
-
-  region             = var.region
-  environment        = "dev"
-  project_name       = var.project_name
-  vpc_id             = module.network.vpc_id  # Update with your VPC reference
-  eks_cluster_name   = module.kubernetes.cluster_name  # Update with your EKS reference
-  notification_email = "team-dev@yourcompany.com"
-  
-  # Development-specific parameters
-  enable_simulated_pen_testing = true
-  scan_frequency               = "daily"
-}
-
-# DR Testing Module
-module "dr_testing" {
-  source = "../../modules/testing/dr_testing"
-
-  primary_region     = var.region
-  dr_region          = var.dr_region
-  environment        = "dev"
-  project_name       = var.project_name
-  notification_email = "team-dev@yourcompany.com"
-  
-  # RTO/RPO targets for development
-  rto_target_minutes = 30
-  rpo_target_minutes = 15
-}
-
-# Add other testing modules as needed
-```
-
-#### Example for Production Environment
-
-Create `/path/to/new-project/environments/prod/testing.tf`:
-
-```terraform
-# Security Testing Module
-module "security_testing" {
-  source = "../../modules/testing/security_testing"
-
-  region             = var.region
-  environment        = "prod"
-  project_name       = var.project_name
-  vpc_id             = module.network.vpc_id
-  eks_cluster_name   = module.kubernetes.cluster_name
-  notification_email = "team-prod@yourcompany.com,security@yourcompany.com"
-  
-  # Production-specific parameters
-  enable_simulated_pen_testing = false
-  scan_frequency               = "weekly"
-}
-
-# DR Testing Module
-module "dr_testing" {
-  source = "../../modules/testing/dr_testing"
-
-  primary_region     = var.region
-  dr_region          = var.dr_region
-  environment        = "prod"
-  project_name       = var.project_name
-  notification_email = "team-prod@yourcompany.com,operations@yourcompany.com"
-  
-  # Stricter RTO/RPO targets for production
-  rto_target_minutes = 15
-  rpo_target_minutes = 5
-}
-
-# Add other testing modules as needed
-```
-
-## Environment-Specific Configuration
-
-Each testing module should be configured according to the requirements of specific environments:
-
-| Parameter | Development | Production |
-|-----------|------------|------------|
-| Notification Recipients | Development team | Production team, Security/Ops teams |
-| Testing Frequency | More frequent | Less frequent, scheduled maintenance |
-| Testing Scope | Broader, exploratory | Targeted, critical paths |
-| Thresholds | More lenient | Stricter |
-
-## Pipeline Integration
-
-### 1. Configure Jenkins Pipeline
-
-Update your Jenkinsfile to include the testing pipelines:
-
-1. Copy the pipeline files to your Jenkins configuration:
    ```bash
-   cp pipelines/testing/dr-Jenkinsfile /path/to/jenkins/pipelines/
-   cp pipelines/testing/security-Jenkinsfile /path/to/jenkins/pipelines/
-   ```
+   cd pipelines/testing/compliance
+   ./run-compliance-tests.sh
+For specific pillar testing:
+# Test security pillar only
+./run-compliance-tests.sh --pillar security
 
-2. Create Jenkins pipeline jobs that reference these files
+# Test reliability pillar only
+./run-compliance-tests.sh --pillar reliability
+Generate and view the compliance report:
+./generate-report.sh
+open reports/compliance-$(date +%Y-%m-%d).html
+Disaster Recovery Testing Pipeline
+This pipeline specifically tests DR capabilities and measures recovery metrics.
 
-3. Configure the parameters for your project:
-   - `ENVIRONMENT` (dev, staging, prod)
-   - `AWS_REGION` 
-   - `PROJECT_NAME`
+Execute the DR testing pipeline:
+cd pipelines/testing/dr
+./run-dr-pipeline.sh
+For testing specific DR scenarios:
+# Test AZ failover
+./run-dr-pipeline.sh --scenario az-failover
 
-### 2. Schedule Automated Tests
+# Test database recovery
+./run-dr-pipeline.sh --scenario db-recovery
 
-Configure Jenkins to run tests on a schedule:
+# Test region failover
+./run-dr-pipeline.sh --scenario region-failover
+View DR test results:
+./show-dr-metrics.sh --last-run
+Using the Runbooks
+The module includes three essential runbooks to support your testing activities:
 
-```groovy
-pipeline {
-    agent any
-    
-    triggers {
-        // Run weekly DR tests
-        cron('0 0 * * 0')  // Every Sunday at midnight
-    }
-    
-    parameters {
-        choice(name: 'ENVIRONMENT', choices: ['dev', 'prod'], description: 'Environment to test')
-        string(name: 'AWS_REGION', defaultValue: 'us-west-2', description: 'AWS Region')
-    }
-    
-    stages {
-        stage('Run DR Tests') {
-            steps {
-                sh "terraform -chdir=environments/${params.ENVIRONMENT} init"
-                sh "terraform -chdir=environments/${params.ENVIRONMENT} apply -target=module.dr_testing -auto-approve"
-            }
-        }
-    }
-}
-```
+1. Incident Response Runbook (incident-response.md)
+   This runbook provides a structured approach to managing incidents during testing.
 
-## Customization Points
+When to use:
 
-When adapting these modules for a new project, consider customizing:
+When an unplanned incident occurs during testing
+To classify incident severity
+To follow proper escalation procedures
+For documenting post-incident analysis
+Key sections:
 
-### 1. Project-Specific Resources
+Incident classification matrix
+Escalation paths and contact information
+Response procedures by incident type
+Post-incident review templates
+2. Test Environment Setup (test-environment-setup.md)
+   This runbook guides you through setting up isolated test environments.
 
-Update references to specific resources based on your project structure:
+When to use:
 
-```terraform
-# Original
-vpc_id = module.eks.vpc_id
+Before running any DR or compliance tests
+When preparing a new test environment
+For refreshing test data
+Key steps:
 
-# Updated for new project
-vpc_id = module.network.vpc_id
-```
+Provision the test infrastructure:
+cd modules/testing
+terraform init
+terraform apply -var-file=test-environment.tfvars
+Validate the environment:
+./validate-test-env.sh
+Seed test data:
+./seed-test-data.sh
+3. Test Execution Procedures (test-execution.md)
+   This runbook provides detailed steps for executing different test scenarios.
 
-### 2. Regional Configuration
+When to use:
 
-Set your project's primary and DR regions:
+During scheduled DR testing
+For ad-hoc DR validation
+When measuring recovery metrics
+Key test types:
 
-```terraform
-# For multi-region projects
-primary_region = "us-west-2"
-dr_region      = "us-east-1"
-```
+Application recovery testing:
+./run-app-recovery-test.sh
+Database failover testing:
+./run-db-failover-test.sh
+Multi-region failover:
+./run-region-failover-test.sh
+Test Data Management
+Backup Test Data
+Before running tests that might modify data:
 
-### 3. Test Parameters
+./backup-test-data.sh
+Restore Test Data
+To return to a known good state:
 
-Adjust thresholds based on your project's requirements:
+./restore-test-data.sh --snapshot latest
+Reporting
+Automated Reports
+Reports are automatically generated after pipeline execution:
 
-```terraform
-# Customize RTO/RPO targets
-rto_target_minutes = 15  # Your project's requirement
-rpo_target_minutes = 5   # Your project's requirement
-```
+Compliance reports: reports/compliance-*.html
+DR test reports: reports/dr-test-*.html
+Performance metrics: reports/metrics-*.json
+Manual Report Generation
+Compliance test reports:
+./generate-compliance-report.sh --format [html|pdf|json]
+DR test performance reports:
+./generate-dr-report.sh --last-run
+Historical metrics dashboard:
+./open-metrics-dashboard.sh
+Integration with CI/CD
+The testing pipelines can be integrated with your CI/CD workflow:
 
-### 4. Notification Endpoints
+# Example GitLab CI configuration
+dr_testing:
+stage: test
+script:
+- cd pipelines/testing/dr
+- ./run-dr-pipeline.sh --ci-mode
+artifacts:
+paths:
+- reports/
+Troubleshooting
+If you encounter issues while running pipelines or tests:
 
-Update notification destinations:
+Check the logs in logs/ directory
+Verify AWS credentials and permissions
+Ensure all prerequisites are met
+Consult the Incident Response Runbook for guidance
+Support
+For assistance with the testing module, contact:
 
-```terraform
-# For your organization
-notification_email = "your-team@yourcompany.com"
-slack_webhook_url  = "https://hooks.slack.com/services/YOUR/WEBHOOK/PATH"
-```
+AWS Infrastructure Team
+Platform Engineering Team
+Cloud Operations Team
 
-## Troubleshooting
-
-If you encounter issues when integrating these testing modules:
-
-1. **Module Not Found**: Ensure the module path is correct relative to your environment directory
-2. **Resource Not Found**: Check that referenced resources (VPCs, EKS clusters) exist and are correctly referenced
-3. **IAM Permissions**: Verify the executing role has permissions to create and manage testing resources
-4. **Pipeline Failures**: Check Jenkins console output for specific errors
-
-## Example Project Structure After Integration
-
-```
-your-project/
-├── environments/
-│   ├── dev/
-│   │   ├── main.tf
-│   │   ├── variables.tf
-│   │   └── testing.tf  # Added testing configuration
-│   └── prod/
-│       ├── main.tf
-│       ├── variables.tf
-│       └── testing.tf  # Added testing configuration
-├── modules/
-│   ├── networking/
-│   ├── kubernetes/
-│   └── testing/        # Copied testing modules
-│       ├── security_testing/
-│       ├── dr_testing/
-│       └── ...
-└── pipelines/
-    ├── main-pipeline.jenkinsfile
-    └── testing/        # Copied pipeline definitions
-        ├── dr-Jenkinsfile
-        └── security-Jenkinsfile
-```
-
-By following this guide, you should be able to successfully integrate these testing modules into any AWS infrastructure project managed by Terraform.
