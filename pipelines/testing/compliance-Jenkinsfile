@@ -1,0 +1,106 @@
+pipeline {
+    agent any
+    
+    parameters {
+        choice(name: 'ENVIRONMENT', choices: ['dev', 'prod', 'dr'], description: 'Environment to run compliance tests against')
+        booleanParam(name: 'GENERATE_REPORT', defaultValue: true, description: 'Generate compliance report')
+    }
+    
+    environment {
+        TERRAFORM_DIR = "environments/${params.ENVIRONMENT}"
+        TERRAFORM_COMPLIANCE_DIR = "terraform-compliance"
+    }
+    
+    stages {
+        stage('Setup') {
+            steps {
+                sh 'pip install terraform-compliance'
+                sh 'pip install checkov'
+            }
+        }
+        
+        stage('Terraform Init') {
+            steps {
+                dir("${TERRAFORM_DIR}") {
+                    sh 'terraform init'
+                }
+            }
+        }
+        
+        stage('Terraform Plan') {
+            steps {
+                dir("${TERRAFORM_DIR}") {
+                    sh 'terraform plan -out=tfplan.out'
+                    sh 'terraform show -json tfplan.out > tfplan.json'
+                }
+            }
+        }
+        
+        stage('Terraform Compliance') {
+            steps {
+                dir("${TERRAFORM_DIR}") {
+                    sh 'terraform-compliance -p tfplan.json -f ../../${TERRAFORM_COMPLIANCE_DIR}/features/'
+                }
+            }
+            post {
+                failure {
+                    echo "Terraform Compliance checks failed. Review the output and fix non-compliant resources."
+                    script {
+                        currentBuild.result = 'UNSTABLE'
+                    }
+                }
+            }
+        }
+        
+        stage('Checkov Analysis') {
+            steps {
+                dir("${TERRAFORM_DIR}") {
+                    sh 'checkov -d . --output-file-path ../../compliance-reports'
+                }
+            }
+        }
+        
+        stage('Generate Report') {
+            when {
+                expression { params.GENERATE_REPORT }
+            }
+            steps {
+                sh '''
+                mkdir -p compliance-reports
+                
+                echo "# Compliance Report for ${ENVIRONMENT}" > compliance-reports/compliance-report-${ENVIRONMENT}.md
+                echo "## Generated on $(date)" >> compliance-reports/compliance-report-${ENVIRONMENT}.md
+                echo "" >> compliance-reports/compliance-report-${ENVIRONMENT}.md
+                
+                echo "## Terraform Compliance Results" >> compliance-reports/compliance-report-${ENVIRONMENT}.md
+                echo "Summary of terraform-compliance checks." >> compliance-reports/compliance-report-${ENVIRONMENT}.md
+                echo "" >> compliance-reports/compliance-report-${ENVIRONMENT}.md
+                
+                echo "## Checkov Results" >> compliance-reports/compliance-report-${ENVIRONMENT}.md
+                echo "See full results in the generated checkov report." >> compliance-reports/compliance-report-${ENVIRONMENT}.md
+                
+                echo "## Next Steps" >> compliance-reports/compliance-report-${ENVIRONMENT}.md
+                echo "1. Review all compliance failures" >> compliance-reports/compliance-report-${ENVIRONMENT}.md
+                echo "2. Make necessary changes to fix compliance issues" >> compliance-reports/compliance-report-${ENVIRONMENT}.md
+                echo "3. Rerun compliance tests" >> compliance-reports/compliance-report-${ENVIRONMENT}.md
+                '''
+                
+                archiveArtifacts artifacts: 'compliance-reports/**/*', allowEmptyArchive: true
+            }
+        }
+    }
+    
+    post {
+        always {
+            cleanWs()
+        }
+        
+        success {
+            echo "Compliance testing completed successfully!"
+        }
+        
+        failure {
+            echo "Compliance testing failed. Please review logs."
+        }
+    }
+}
