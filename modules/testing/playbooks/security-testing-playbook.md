@@ -6,7 +6,48 @@ This playbook provides structured procedures for validating the security control
 
 ## Test Categories
 
-### 1. IAM Security Tests
+### 1. Infrastructure-as-Code Compliance Tests
+
+#### 1.1. Terraform Compliance Testing
+
+**Objective**: Validate Terraform configurations against security policies and compliance requirements using BDD-style tests.
+
+**Procedure**:
+1. Run Terraform Compliance tests against Terraform plan
+   ```bash
+   cd pipelines/testing
+   ./run-terraform-compliance.sh
+   ```
+2. Review non-compliant resources and configurations
+3. Document findings and remediation steps
+4. Validate fixes with re-testing
+
+**Success Criteria**:
+- All Terraform configurations pass compliance tests
+- No critical security misconfigurations in infrastructure code
+- Compliance with organizational security policies
+
+#### 1.2. Static Code Analysis
+
+**Objective**: Identify security issues in infrastructure code using static analysis tools.
+
+**Procedure**:
+1. Run Checkov against Terraform code
+   ```bash
+   checkov -d . --framework terraform
+   ```
+2. Run tfsec for additional security findings
+   ```bash
+   tfsec .
+   ```
+3. Document and remediate identified issues
+
+**Success Criteria**:
+- No high or critical security findings in infrastructure code
+- Compliance with security best practices
+- Properly configured security controls in all infrastructure components
+
+### 2. IAM Security Tests
 
 #### 1.1. IAM Role and Policy Validation
 
@@ -126,10 +167,11 @@ This playbook provides structured procedures for validating the security control
 ## Execution Guidelines
 
 1. Obtain proper authorization before security testing
-2. Document all findings with evidence
-3. Classify findings by severity
-4. Develop remediation plan for identified issues
-5. Retest after remediation
+2. Start with Infrastructure-as-Code testing before deploying resources
+3. Document all findings with evidence
+4. Classify findings by severity
+5. Develop remediation plan for identified issues
+6. Retest after remediation
 
 ## Reporting
 

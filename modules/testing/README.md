@@ -97,3 +97,5 @@ View test results:
 open reports/latest-report.html
 For detailed usage instructions, refer to the USAGE.md document.
 For detailed usage instructions, please refer to the USAGE.md document.
+
+![testing layout.png](../../docs/testing%20layout.png)

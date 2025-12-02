@@ -26,15 +26,52 @@ This pipeline validates your AWS infrastructure against the AWS Well-Architected
    ```bash
    cd pipelines/testing/compliance
    ./run-compliance-tests.sh
-For specific pillar testing:
-# Test security pillar only
-./run-compliance-tests.sh --pillar security
+   ```
 
-# Test reliability pillar only
-./run-compliance-tests.sh --pillar reliability
-Generate and view the compliance report:
-./generate-report.sh
-open reports/compliance-$(date +%Y-%m-%d).html
+   For specific pillar testing:
+   ```bash
+   # Test security pillar only
+   ./run-compliance-tests.sh --pillar security
+
+   # Test reliability pillar only
+   ./run-compliance-tests.sh --pillar reliability
+   ```
+
+2. Generate and view the compliance report:
+   ```bash
+   ./generate-report.sh
+   open reports/compliance-$(date +%Y-%m-%d).html
+   ```
+
+### Terraform Compliance Testing
+
+This pipeline validates your Terraform configuration files against compliance policies using BDD-style tests.
+
+1. Execute the Terraform Compliance tests:
+
+   ```bash
+   cd pipelines/testing
+   ./run-terraform-compliance.sh
+   ```
+
+   For testing specific compliance features:
+   ```bash
+   # Test EKS security compliance only
+   ./run-terraform-compliance.sh --feature eks_security
+
+   # Test S3 security compliance only
+   ./run-terraform-compliance.sh --feature s3_security
+   ```
+
+2. View compliance test results:
+   ```bash
+   open reports/terraform-compliance-$(date +%Y-%m-%d).html
+   ```
+
+3. For more information about Terraform Compliance tests, refer to:
+   ```bash
+   cat terraform-compliance/README.md
+   ```
 Disaster Recovery Testing Pipeline
 This pipeline specifically tests DR capabilities and measures recovery metrics.
 
