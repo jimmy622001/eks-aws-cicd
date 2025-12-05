@@ -1,0 +1,243 @@
+name: Performance & Cost Optimization Testing
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to test'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - stage
+          - prod
+      run_load_tests:
+        description: 'Run performance load tests'
+        required: true
+        default: true
+        type: boolean
+      run_cost_analysis:
+        description: 'Run cost optimization analysis'
+        required: true
+        default: true
+        type: boolean
+  schedule:
+    # Run weekly on Monday at midnight
+    - cron: '0 0 * * 1'
+
+jobs:
+  performance-testing:
+    name: Performance Efficiency Testing
+    if: ${{ github.event.inputs.run_load_tests != 'false' }}
+    runs-on: ubuntu-latest
+    
+    env:
+      ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Install Dependencies
+        run: |
+          pip install locust boto3 pytest
+          
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+          
+      - name: Extract Service Endpoints
+        run: |
+          # Extract necessary service endpoints from Terraform outputs
+          cd environments/${{ env.ENVIRONMENT }}
+          terraform init -backend=false
+          terraform output -json > ../../service-endpoints.json
+          cd ../..
+          
+      - name: Run Load Tests
+        run: |
+          mkdir -p performance-reports
+          
+          # Run load tests using locust
+          cd modules/testing/performance_testing
+          python run_load_tests.py \
+            --environment ${{ env.ENVIRONMENT }} \
+            --endpoints ../../service-endpoints.json \
+            --duration 5 \
+            --users 50 \
+            --output ../../performance-reports/load_test_results.json
+            
+      - name: Analyze Autoscaling Efficiency
+        run: |
+          # Check if autoscaling is properly configured and responsive
+          cd modules/testing/performance_testing
+          python analyze_autoscaling.py \
+            --environment ${{ env.ENVIRONMENT }} \
+            --output ../../performance-reports/autoscaling_analysis.json
+            
+      - name: Validate Resource Sizing
+        run: |
+          # Check if resources are properly sized
+          cd modules/testing/performance_testing
+          python validate_resource_sizing.py \
+            --environment ${{ env.ENVIRONMENT }} \
+            --output ../../performance-reports/resource_sizing_report.json
+            
+      - name: Generate Performance Report
+        run: |
+          mkdir -p performance-reports
+          
+          cat > performance-reports/performance-report.md << EOF
+          # Performance Efficiency Test Report
+          
+          **Environment:** ${{ env.ENVIRONMENT }}
+          **Date:** $(date)
+          
+          ## Load Test Results
+          
+          The load test results demonstrate how well the infrastructure handles load and scales.
+          See load_test_results.json for detailed metrics.
+          
+          ## Autoscaling Analysis
+          
+          This analysis evaluates how effectively autoscaling policies respond to changes in load.
+          See autoscaling_analysis.json for detailed findings.
+          
+          ## Resource Sizing Validation
+          
+          This validation checks if resources are appropriately sized for their workloads.
+          See resource_sizing_report.json for detailed recommendations.
+          
+          ## Performance Efficiency Score
+          
+          Based on the test results, the infrastructure receives the following ratings:
+          
+          - Response time: [TBD from test results]
+          - Throughput: [TBD from test results]
+          - Scaling efficiency: [TBD from test results]
+          - Resource utilization: [TBD from test results]
+          
+          ## Recommendations
+          
+          [To be generated from test results]
+          
+          EOF
+          
+      - name: Upload Performance Reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-reports
+          path: performance-reports/
+          retention-days: 30
+          
+  cost-optimization:
+    name: Cost Optimization Testing
+    if: ${{ github.event.inputs.run_cost_analysis != 'false' }}
+    runs-on: ubuntu-latest
+    
+    env:
+      ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Install Dependencies
+        run: |
+          pip install boto3 infracost-python
+          
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+          
+      - name: Setup Infracost
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/infracost/infracost/master/scripts/install.sh | sh
+          infracost auth login --key ${{ secrets.INFRACOST_API_KEY }}
+          
+      - name: Run Infracost Analysis
+        run: |
+          mkdir -p cost-reports
+          
+          cd environments/${{ env.ENVIRONMENT }}
+          terraform init
+          infracost breakdown --path . --format json > ../../cost-reports/infracost-analysis.json
+          infracost breakdown --path . --format html > ../../cost-reports/infracost-analysis.html
+          
+      - name: Identify Unused Resources
+        run: |
+          # Script to find unused or underutilized AWS resources
+          cd modules/testing/cost_testing
+          python find_unused_resources.py \
+            --environment ${{ env.ENVIRONMENT }} \
+            --output ../../cost-reports/unused_resources.json
+            
+      - name: Suggest Reserved Instances
+        run: |
+          # Analyze usage patterns and suggest reserved instances where appropriate
+          cd modules/testing/cost_testing
+          python suggest_reserved_instances.py \
+            --environment ${{ env.ENVIRONMENT }} \
+            --output ../../cost-reports/ri_recommendations.json
+            
+      - name: Generate Cost Optimization Report
+        run: |
+          cat > cost-reports/cost-optimization-report.md << EOF
+          # Cost Optimization Report
+          
+          **Environment:** ${{ env.ENVIRONMENT }}
+          **Date:** $(date)
+          
+          ## Cost Analysis
+          
+          See infracost-analysis.html for detailed breakdown of current infrastructure costs.
+          
+          ## Unused Resources
+          
+          The following resources have been identified as unused or significantly underutilized:
+          See unused_resources.json for detailed list.
+          
+          ## Reserved Instance Recommendations
+          
+          Based on usage patterns, the following reserved instance purchases are recommended:
+          See ri_recommendations.json for detailed recommendations.
+          
+          ## Cost Optimization Opportunities
+          
+          The following changes could result in cost savings:
+          
+          1. Right-size overprovisioned resources
+          2. Remove unused resources
+          3. Consider reserved instances for stable workloads
+          4. Utilize spot instances for fault-tolerant workloads
+          5. Implement automated instance scheduling for non-production environments
+          
+          ## Estimated Annual Savings
+          
+          [To be calculated from analysis results]
+          
+          EOF
+          
+      - name: Upload Cost Reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: cost-reports
+          path: cost-reports/
+          retention-days: 30

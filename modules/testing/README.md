@@ -4,6 +4,8 @@
 
 This testing module provides comprehensive testing frameworks and methodologies to ensure AWS infrastructure compliance with the AWS Well-Architected Framework pillars and validate disaster recovery capabilities. The module includes automated testing pipelines, disaster recovery testing playbooks, and detailed operational runbooks.
 
+> **Important Update**: All testing pipelines are now available as GitHub Actions workflows in the `.github/workflows` directory, providing a more integrated and accessible testing experience.
+
 ## Key Components
 
 ### Testing Pipelines
@@ -83,19 +85,46 @@ This testing module is designed to align with:
 
 ## Quick Start
 
-For new users, here are the most common commands to get started with testing:
+For new users, here are the most common ways to get started with testing:
+
+### Using GitHub Actions (Recommended)
+
+1. Run the compliance test workflow:
+   - Go to Actions tab in GitHub
+   - Select "Compliance Testing"
+   - Configure parameters and click "Run workflow"
+
+2. Run the disaster recovery test workflow:
+   - Go to Actions tab in GitHub
+   - Select "Disaster Recovery Testing"
+   - Configure parameters and click "Run workflow"
+
+3. Run the security test workflow:
+   - Go to Actions tab in GitHub
+   - Select "Security Testing"
+   - Configure parameters and click "Run workflow"
+
+### Using Jenkins Pipelines (Legacy)
 
 1. Run the compliance test pipeline:
    ```bash
    cd pipelines/testing/compliance
    ./run-compliance-tests.sh
-Run the disaster recovery test pipeline:
-cd pipelines/testing/dr
-./run-dr-pipeline.sh
-View test results:
-./generate-report.sh
-open reports/latest-report.html
-For detailed usage instructions, refer to the USAGE.md document.
+   ```
+
+2. Run the disaster recovery test pipeline:
+   ```bash
+   cd pipelines/testing/dr
+   ./run-dr-pipeline.sh
+   ```
+
+3. View test results:
+   ```bash
+   ./generate-report.sh
+   open reports/latest-report.html
+   ```
 For detailed usage instructions, please refer to the USAGE.md document.
 
 ![testing layout.png](../../docs/testing%20layout.png)
+
+> **Note**: The testing layout diagram needs to be updated to reflect the GitHub Actions workflows implementation. Please refer to `../../docs/testing-layout-description.md` for details on required updates.

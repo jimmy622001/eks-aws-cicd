@@ -1,0 +1,183 @@
+name: Security Testing
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to test'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - stage
+          - prod
+      scan_type:
+        description: 'Type of security scan to run'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - quick
+          - targeted
+      generate_report:
+        description: 'Generate security report'
+        required: true
+        default: true
+        type: boolean
+      fail_on_medium:
+        description: 'Fail pipeline on medium severity findings'
+        required: true
+        default: false
+        type: boolean
+  push:
+    paths:
+      - 'modules/**/*.tf'
+      - 'environments/**/*.tf'
+      - '**/*.js'
+      - '**/*.py'
+
+jobs:
+  security-testing:
+    name: Run Security Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Install Security Tools
+        run: |
+          pip install detect-secrets tfsec-python checkov
+          npm install -g snyk
+          
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+          
+      - name: Run detect-secrets
+        id: secrets
+        run: |
+          mkdir -p security-reports
+          detect-secrets scan --all-files > security-reports/secrets-report.json
+          echo "Secrets scan complete"
+          
+      - name: Run tfsec
+        id: tfsec
+        continue-on-error: true
+        run: |
+          tfsec . --format json > security-reports/tfsec-report.json
+          tfsec . --format markdown > security-reports/tfsec-report.md
+          echo "TFSec scan complete"
+          
+      - name: Run Security Lambda Test
+        run: |
+          # Create a test event JSON
+          cat > test-event.json << EOF
+          {
+            "testType": "${{ github.event.inputs.scan_type || 'full' }}",
+            "environment": "${{ github.event.inputs.environment || 'dev' }}",
+            "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          }
+          EOF
+          
+          # Deploy the security testing lambda if needed
+          cd modules/testing/security_testing
+          zip -r lambda.zip ./*.js
+          
+          # Run the security testing lambda
+          aws lambda invoke \
+            --function-name security_testing_function \
+            --payload file://../../test-event.json \
+            security-scan-results.json
+          
+          mkdir -p ../../security-reports
+          cp security-scan-results.json ../../security-reports/
+          cd ../../
+          
+      - name: Generate Comprehensive Security Report
+        if: ${{ github.event.inputs.generate_report != 'false' }}
+        run: |
+          ENV="${{ github.event.inputs.environment || 'dev' }}"
+          SCAN_TYPE="${{ github.event.inputs.scan_type || 'full' }}"
+          
+          cat > security-reports/security-report-${ENV}.md << EOF
+          # Security Scan Report
+          
+          **Environment:** ${ENV}
+          **Scan Type:** ${SCAN_TYPE}
+          **Date:** $(date)
+          
+          ## Executive Summary
+          
+          This report contains findings from automated security scanning tools run against the AWS infrastructure code.
+          
+          ## Potential Secret Leaks
+          
+          See the secrets-report.json file for details on potential secrets found in the codebase.
+          
+          ## Infrastructure Security Issues
+          
+          See the tfsec-report.md file for detailed findings.
+          
+          ## Lambda Security Testing Results
+          
+          The Lambda security scanner tested the following services:
+          - EKS Clusters
+          - S3 Buckets
+          - RDS Databases
+          - IAM Roles & Policies
+          - CloudTrail Configuration
+          - KMS Key Usage
+          
+          See security-scan-results.json for detailed findings.
+          
+          ## Recommendations
+          
+          1. Review all findings with medium or high severity
+          2. Create remediation tickets for confirmed issues
+          3. Implement automated guardrails to prevent similar issues
+          4. Update security testing policies if false positives are found
+          
+          ## Next Steps
+          
+          Schedule a follow-up security review to validate fixed findings and identify any new concerns.
+          EOF
+          
+      - name: Upload Security Reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-reports
+          path: security-reports/
+          retention-days: 30
+          
+      - name: Check High Severity Findings
+        run: |
+          # This is a placeholder for checking high severity findings
+          # In a real implementation, you would parse the reports and exit with code 1 if high severity issues are found
+          echo "Checking for high severity findings..."
+          
+          # Example check for high severity findings in tfsec results
+          if grep -q "HIGH" security-reports/tfsec-report.md; then
+            echo "::error::High severity security findings detected!"
+            exit 1
+          fi
+          
+          # Check for medium severity findings if configured
+          if [[ "${{ github.event.inputs.fail_on_medium }}" == "true" ]]; then
+            if grep -q "MEDIUM" security-reports/tfsec-report.md; then
+              echo "::error::Medium severity security findings detected!"
+              exit 1
+            fi
+          fi
+          
+          echo "No critical security issues found."

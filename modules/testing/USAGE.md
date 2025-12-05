@@ -1,8 +1,3 @@
-You're right, I should make sure the USAGE.md file retains clear instructions for running the pipelines. Let me revise the USAGE.md file to ensure it includes detailed instructions for running both the infrastructure compliance testing pipeline and the DR testing pipeline, along with how to use the attached runbooks (incident-response.md, test-environment-setup.md, and test-execution.md).
-
-Here's the revised USAGE.md with clearer pipeline instructions:
-
-USAGE.md
 # AWS Infrastructure Testing Module - Usage Guide
 
 This document provides detailed instructions for using the testing module, including running the testing pipelines, working with the attached playbooks and runbooks, and reporting procedures.
@@ -17,7 +12,50 @@ This document provides detailed instructions for using the testing module, inclu
 
 ## Running the Testing Pipelines
 
-### Infrastructure Compliance Testing Pipeline
+### Testing with GitHub Actions (Recommended)
+
+We now support GitHub Actions workflows for all testing operations:
+
+#### Running Compliance Tests with GitHub Actions
+
+1. Navigate to the Actions tab in GitHub
+2. Select the "Compliance Testing" workflow
+3. Click "Run workflow"
+4. Configure the following parameters:
+   - Environment (dev/prod/dr)
+   - Generate report (true/false)
+5. Click "Run workflow"
+6. Once complete, download the compliance reports from the workflow artifacts
+
+#### Running DR Tests with GitHub Actions
+
+1. Navigate to the Actions tab in GitHub
+2. Select the "Disaster Recovery Testing" workflow
+3. Click "Run workflow"
+4. Configure test parameters including:
+   - Environment
+   - Primary and DR regions
+   - Network disruption settings
+   - Target RPO and RTO values
+5. Click "Run workflow"
+6. Once complete, download the DR test report from the workflow artifacts
+
+#### Running Security Tests with GitHub Actions
+
+1. Navigate to the Actions tab in GitHub
+2. Select the "Security Testing" workflow
+3. Click "Run workflow"
+4. Configure parameters:
+   - Environment to test
+   - Scan type (full/quick/targeted)
+   - Report generation
+   - Failure threshold
+5. Click "Run workflow"
+6. Once complete, download the security reports from the workflow artifacts
+
+### Using Jenkins Pipelines (Legacy)
+
+#### Infrastructure Compliance Testing Pipeline
 
 This pipeline validates your AWS infrastructure against the AWS Well-Architected Framework pillars.
 
@@ -72,121 +110,204 @@ This pipeline validates your Terraform configuration files against compliance po
    ```bash
    cat terraform-compliance/README.md
    ```
-Disaster Recovery Testing Pipeline
+
+### Disaster Recovery Testing Pipeline
+
 This pipeline specifically tests DR capabilities and measures recovery metrics.
 
-Execute the DR testing pipeline:
-cd pipelines/testing/dr
-./run-dr-pipeline.sh
-For testing specific DR scenarios:
-# Test AZ failover
-./run-dr-pipeline.sh --scenario az-failover
+1. Execute the DR testing pipeline:
+   ```bash
+   cd pipelines/testing/dr
+   ./run-dr-pipeline.sh
+   ```
 
-# Test database recovery
-./run-dr-pipeline.sh --scenario db-recovery
+   For testing specific DR scenarios:
+   ```bash
+   # Test AZ failover
+   ./run-dr-pipeline.sh --scenario az-failover
 
-# Test region failover
-./run-dr-pipeline.sh --scenario region-failover
-View DR test results:
-./show-dr-metrics.sh --last-run
-Using the Runbooks
+   # Test database recovery
+   ./run-dr-pipeline.sh --scenario db-recovery
+
+   # Test region failover
+   ./run-dr-pipeline.sh --scenario region-failover
+   ```
+
+2. View DR test results:
+   ```bash
+   ./show-dr-metrics.sh --last-run
+   ```
+
+## Using the Runbooks
+
 The module includes three essential runbooks to support your testing activities:
 
-1. Incident Response Runbook (incident-response.md)
-   This runbook provides a structured approach to managing incidents during testing.
+### 1. Incident Response Runbook (incident-response.md)
 
-When to use:
+This runbook provides a structured approach to managing incidents during testing.
 
-When an unplanned incident occurs during testing
-To classify incident severity
-To follow proper escalation procedures
-For documenting post-incident analysis
-Key sections:
+**When to use:**
+- When an unplanned incident occurs during testing
+- To classify incident severity
+- To follow proper escalation procedures
+- For documenting post-incident analysis
 
-Incident classification matrix
-Escalation paths and contact information
-Response procedures by incident type
-Post-incident review templates
-2. Test Environment Setup (test-environment-setup.md)
-   This runbook guides you through setting up isolated test environments.
+**Key sections:**
+- Incident classification matrix
+- Escalation paths and contact information
+- Response procedures by incident type
+- Post-incident review templates
 
-When to use:
+### 2. Test Environment Setup (test-environment-setup.md)
 
-Before running any DR or compliance tests
-When preparing a new test environment
-For refreshing test data
-Key steps:
+This runbook guides you through setting up isolated test environments.
 
-Provision the test infrastructure:
-cd modules/testing
-terraform init
-terraform apply -var-file=test-environment.tfvars
-Validate the environment:
-./validate-test-env.sh
-Seed test data:
-./seed-test-data.sh
-3. Test Execution Procedures (test-execution.md)
-   This runbook provides detailed steps for executing different test scenarios.
+**When to use:**
+- Before running any DR or compliance tests
+- When preparing a new test environment
+- For refreshing test data
 
-When to use:
+**Key steps:**
+1. Provision the test infrastructure:
+   ```bash
+   cd modules/testing
+   terraform init
+   terraform apply -var-file=test-environment.tfvars
+   ```
 
-During scheduled DR testing
-For ad-hoc DR validation
-When measuring recovery metrics
-Key test types:
+2. Validate the environment:
+   ```bash
+   ./validate-test-env.sh
+   ```
 
-Application recovery testing:
-./run-app-recovery-test.sh
-Database failover testing:
-./run-db-failover-test.sh
-Multi-region failover:
-./run-region-failover-test.sh
-Test Data Management
-Backup Test Data
+3. Seed test data:
+   ```bash
+   ./seed-test-data.sh
+   ```
+
+### 3. Test Execution Procedures (test-execution.md)
+
+This runbook provides detailed steps for executing different test scenarios.
+
+**When to use:**
+- During scheduled DR testing
+- For ad-hoc DR validation
+- When measuring recovery metrics
+
+**Key test types:**
+1. Application recovery testing:
+   ```bash
+   ./run-app-recovery-test.sh
+   ```
+
+2. Database failover testing:
+   ```bash
+   ./run-db-failover-test.sh
+   ```
+
+3. Multi-region failover:
+   ```bash
+   ./run-region-failover-test.sh
+   ```
+
+## Test Data Management
+
+### Backup Test Data
+
 Before running tests that might modify data:
-
+```bash
 ./backup-test-data.sh
-Restore Test Data
+```
+
+### Restore Test Data
+
 To return to a known good state:
-
+```bash
 ./restore-test-data.sh --snapshot latest
-Reporting
-Automated Reports
+```
+
+## Reporting
+
+### Automated Reports
+
 Reports are automatically generated after pipeline execution:
+- Compliance reports: `reports/compliance-*.html`
+- DR test reports: `reports/dr-test-*.html`
+- Performance metrics: `reports/metrics-*.json`
 
-Compliance reports: reports/compliance-*.html
-DR test reports: reports/dr-test-*.html
-Performance metrics: reports/metrics-*.json
-Manual Report Generation
-Compliance test reports:
-./generate-compliance-report.sh --format [html|pdf|json]
-DR test performance reports:
-./generate-dr-report.sh --last-run
-Historical metrics dashboard:
-./open-metrics-dashboard.sh
-Integration with CI/CD
-The testing pipelines can be integrated with your CI/CD workflow:
+### Manual Report Generation
 
+1. Compliance test reports:
+   ```bash
+   ./generate-compliance-report.sh --format [html|pdf|json]
+   ```
+
+2. DR test performance reports:
+   ```bash
+   ./generate-dr-report.sh --last-run
+   ```
+
+3. Historical metrics dashboard:
+   ```bash
+   ./open-metrics-dashboard.sh
+   ```
+
+## Integration with CI/CD
+
+### GitHub Actions Integration (Recommended)
+
+The testing workflows are already integrated with CI/CD:
+
+- **Automatic Triggers**: 
+  - Compliance tests run automatically when infrastructure code changes
+  - DR tests run automatically when DR-related configurations change
+  - Security tests run automatically on code changes
+
+- **PR Checks**: 
+  - Tests can be configured as required checks before merging PRs
+  - Each workflow generates artifacts with detailed reports
+
+- **Environment Deployment Validation**: 
+  - Use these workflows to validate environment changes before deployment
+  - Incorporate test results into deployment decisions
+
+- **Scheduled Testing**:
+  - Set up scheduled runs of these workflows to ensure ongoing compliance and security
+  - Example schedule configuration in workflow files:
+    ```yaml
+    on:
+      schedule:
+        - cron: '0 0 * * 0'  # Run every Sunday at midnight
+    ```
+
+### Other CI/CD Systems
+
+For other CI/CD systems like GitLab CI:
+
+```yaml
 # Example GitLab CI configuration
 dr_testing:
-stage: test
-script:
-- cd pipelines/testing/dr
-- ./run-dr-pipeline.sh --ci-mode
-artifacts:
-paths:
-- reports/
-Troubleshooting
+  stage: test
+  script:
+    - cd pipelines/testing/dr
+    - ./run-dr-pipeline.sh --ci-mode
+  artifacts:
+    paths:
+      - reports/
+```
+
+## Troubleshooting
+
 If you encounter issues while running pipelines or tests:
 
-Check the logs in logs/ directory
-Verify AWS credentials and permissions
-Ensure all prerequisites are met
-Consult the Incident Response Runbook for guidance
-Support
+1. Check the logs in `logs/` directory
+2. Verify AWS credentials and permissions
+3. Ensure all prerequisites are met
+4. Consult the Incident Response Runbook for guidance
+
+## Support
+
 For assistance with the testing module, contact:
-
-AWS Infrastructure Team
-Platform Engineering Team
-Cloud Operations Team
-
+- AWS Infrastructure Team
+- Platform Engineering Team
+- Cloud Operations Team

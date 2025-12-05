@@ -1,0 +1,166 @@
+name: Disaster Recovery Testing
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to run the DR test in'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - stage
+          - prod
+      primary_region:
+        description: 'Primary AWS region'
+        required: true
+        default: 'us-east-1'
+        type: string
+      dr_region:
+        description: 'DR AWS region'
+        required: true
+        default: 'us-west-2'
+        type: string
+      enable_network_disruption:
+        description: 'Enable network disruption testing'
+        required: true
+        default: false
+        type: boolean
+      test_timeout_minutes:
+        description: 'Maximum test duration in minutes'
+        required: true
+        default: '30'
+        type: string
+      target_rpo_seconds:
+        description: 'Target Recovery Point Objective in seconds'
+        required: true
+        default: '300'
+        type: string
+      target_rto_minutes:
+        description: 'Target Recovery Time Objective in minutes'
+        required: true
+        default: '15'
+        type: string
+      cleanup_after_test:
+        description: 'Destroy all test resources after running'
+        required: true
+        default: true
+        type: boolean
+  push:
+    paths:
+      - 'modules/testing/dr_testing/**'
+      - 'environments/*/testing.tf'
+
+jobs:
+  dr-testing:
+    name: Run DR Tests
+    runs-on: ubuntu-latest
+    
+    env:
+      TF_VAR_environment: ${{ github.event.inputs.environment || 'dev' }}
+      TF_VAR_primary_region: ${{ github.event.inputs.primary_region || 'us-east-1' }}
+      TF_VAR_dr_region: ${{ github.event.inputs.dr_region || 'us-west-2' }}
+      TF_VAR_enable_network_disruption_test: ${{ github.event.inputs.enable_network_disruption || false }}
+      TF_VAR_test_timeout_minutes: ${{ github.event.inputs.test_timeout_minutes || '30' }}
+      TF_VAR_target_rpo_seconds: ${{ github.event.inputs.target_rpo_seconds || '300' }}
+      TF_VAR_target_rto_minutes: ${{ github.event.inputs.target_rto_minutes || '15' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.0.0
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ github.event.inputs.primary_region || 'us-east-1' }}
+      
+      - name: Terraform Init
+        working-directory: environments/${{ github.event.inputs.environment || 'dev' }}
+        run: terraform init
+      
+      - name: Uncomment DR Testing Module
+        working-directory: environments/${{ github.event.inputs.environment || 'dev' }}
+        run: |
+          cp testing.tf testing.tf.bak
+          sed -i 's/\/\*\n# Disaster Recovery (Reliability) Testing Module/# Disaster Recovery (Reliability) Testing Module/g' testing.tf
+          sed -i 's/\*\//# End of DR Testing Module/g' testing.tf
+      
+      - name: Plan DR Testing
+        working-directory: environments/${{ github.event.inputs.environment || 'dev' }}
+        run: terraform plan -target=module.dr_testing -out=dr-testing-plan.tfplan
+      
+      - name: Apply DR Testing Infrastructure
+        working-directory: environments/${{ github.event.inputs.environment || 'dev' }}
+        run: terraform apply "dr-testing-plan.tfplan"
+      
+      - name: Run DR Tests
+        working-directory: environments/${{ github.event.inputs.environment || 'dev' }}
+        run: |
+          # Execute DR tests by invoking the FIS experiment
+          TEMPLATE_ID=$(terraform output -raw dr_test_template_id)
+          
+          aws fis start-experiment \
+            --experiment-template-id $TEMPLATE_ID \
+            --tags Project=${{ env.TF_VAR_environment }}-dr-test-${{ github.run_id }}
+          
+          # Wait for the test to complete
+          sleep 30
+          
+          # Get experiment ID from the most recent experiment
+          EXPERIMENT_ID=$(aws fis list-experiments --query "experiments[0].id" --output text)
+          
+          # Wait for experiment to complete
+          aws fis wait experiment-completed --id $EXPERIMENT_ID
+          
+          # Get the test results
+          aws lambda invoke \
+            --function-name ${{ env.TF_VAR_environment }}-rpo-validator \
+            --payload '{"testId": "'$EXPERIMENT_ID'"}' rpo-results.json
+          
+          aws lambda invoke \
+            --function-name ${{ env.TF_VAR_environment }}-rto-validator \
+            --payload '{"testId": "'$EXPERIMENT_ID'"}' rto-results.json
+          
+          cat rpo-results.json
+          cat rto-results.json
+      
+      - name: Generate Report
+        run: |
+          # Generate a simple report from the test results
+          echo "DR Test Report" > dr-test-report.txt
+          echo "==============" >> dr-test-report.txt
+          echo "" >> dr-test-report.txt
+          echo "Environment: ${{ env.TF_VAR_environment }}" >> dr-test-report.txt
+          echo "Primary Region: ${{ env.TF_VAR_primary_region }}" >> dr-test-report.txt
+          echo "DR Region: ${{ env.TF_VAR_dr_region }}" >> dr-test-report.txt
+          echo "Test Date: $(date)" >> dr-test-report.txt
+          echo "" >> dr-test-report.txt
+          echo "RPO Results:" >> dr-test-report.txt
+          cat rpo-results.json >> dr-test-report.txt
+          echo "" >> dr-test-report.txt
+          echo "RTO Results:" >> dr-test-report.txt
+          cat rto-results.json >> dr-test-report.txt
+          
+          cat dr-test-report.txt
+      
+      - name: Upload DR Test Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: dr-test-report
+          path: dr-test-report.txt
+          retention-days: 30
+      
+      - name: Cleanup
+        if: ${{ github.event.inputs.cleanup_after_test != 'false' && always() }}
+        working-directory: environments/${{ github.event.inputs.environment || 'dev' }}
+        run: |
+          terraform destroy -target=module.dr_testing -auto-approve
+          cp testing.tf.bak testing.tf

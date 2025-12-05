@@ -1,0 +1,122 @@
+name: Compliance Testing
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to test'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
+          - dr
+      generate_report:
+        description: 'Generate compliance report'
+        required: true
+        default: true
+        type: boolean
+  push:
+    paths:
+      - 'environments/**/*.tf'
+      - 'modules/**/*.tf'
+      - '!modules/testing/**'
+
+jobs:
+  compliance-tests:
+    name: Run Compliance Tests
+    runs-on: ubuntu-latest
+    
+    env:
+      TERRAFORM_DIR: environments/${{ github.event.inputs.environment || 'dev' }}
+      TERRAFORM_COMPLIANCE_DIR: terraform-compliance
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.0.0
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install Dependencies
+        run: |
+          pip install terraform-compliance checkov
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      
+      - name: Terraform Init
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: terraform init
+      
+      - name: Terraform Plan
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: |
+          terraform plan -out=tfplan.out
+          terraform show -json tfplan.out > tfplan.json
+      
+      - name: Run Terraform Compliance
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        continue-on-error: true
+        id: compliance
+        run: |
+          terraform-compliance -p tfplan.json -f ../../${{ env.TERRAFORM_COMPLIANCE_DIR }}/features/ | tee compliance-output.txt
+      
+      - name: Run Checkov Analysis
+        continue-on-error: true
+        id: checkov
+        working-directory: ${{ env.TERRAFORM_DIR }}
+        run: |
+          checkov -d . --output-file-path ../../compliance-reports
+      
+      - name: Generate Compliance Report
+        if: ${{ github.event.inputs.generate_report != 'false' }}
+        run: |
+          mkdir -p compliance-reports
+          
+          ENV="${{ github.event.inputs.environment || 'dev' }}"
+          
+          echo "# Compliance Report for ${ENV}" > compliance-reports/compliance-report-${ENV}.md
+          echo "## Generated on $(date)" >> compliance-reports/compliance-report-${ENV}.md
+          echo "" >> compliance-reports/compliance-report-${ENV}.md
+          
+          echo "## Terraform Compliance Results" >> compliance-reports/compliance-report-${ENV}.md
+          echo "Summary of terraform-compliance checks:" >> compliance-reports/compliance-report-${ENV}.md
+          echo '```' >> compliance-reports/compliance-report-${ENV}.md
+          cat ${{ env.TERRAFORM_DIR }}/compliance-output.txt >> compliance-reports/compliance-report-${ENV}.md
+          echo '```' >> compliance-reports/compliance-report-${ENV}.md
+          echo "" >> compliance-reports/compliance-report-${ENV}.md
+          
+          echo "## Checkov Results" >> compliance-reports/compliance-report-${ENV}.md
+          echo "See full results in the generated checkov report." >> compliance-reports/compliance-report-${ENV}.md
+          
+          echo "## Next Steps" >> compliance-reports/compliance-report-${ENV}.md
+          echo "1. Review all compliance failures" >> compliance-reports/compliance-report-${ENV}.md
+          echo "2. Make necessary changes to fix compliance issues" >> compliance-reports/compliance-report-${ENV}.md
+          echo "3. Rerun compliance tests" >> compliance-reports/compliance-report-${ENV}.md
+      
+      - name: Upload Compliance Reports
+        if: ${{ github.event.inputs.generate_report != 'false' }}
+        uses: actions/upload-artifact@v3
+        with:
+          name: compliance-reports
+          path: compliance-reports/
+          retention-days: 30
+      
+      - name: Check Test Results
+        if: steps.compliance.outcome == 'failure' || steps.checkov.outcome == 'failure'
+        run: |
+          echo "::warning::Compliance tests failed. Review the reports for details."
+          exit 1

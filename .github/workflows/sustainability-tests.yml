@@ -1,0 +1,135 @@
+name: Sustainability Testing
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to test'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - stage
+          - prod
+  schedule:
+    # Run monthly on the 1st at midnight
+    - cron: '0 0 1 * *'
+
+jobs:
+  sustainability-testing:
+    name: Run Sustainability Tests
+    runs-on: ubuntu-latest
+    
+    env:
+      ENVIRONMENT: ${{ github.event.inputs.environment || 'dev' }}
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Install Dependencies
+        run: |
+          pip install boto3 terraform-carbon
+          
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+          
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.0.0
+          
+      - name: Analyze Carbon Footprint
+        run: |
+          mkdir -p sustainability-reports
+          
+          # Run carbon footprint analysis
+          cd environments/${{ env.ENVIRONMENT }}
+          terraform init
+          terraform-carbon scan --path . --output-file ../../sustainability-reports/carbon-footprint.json
+          
+      - name: Analyze Resource Utilization Patterns
+        run: |
+          # Check if resources are being efficiently utilized
+          cd modules/testing/sustainability_testing
+          python analyze_utilization.py \
+            --environment ${{ env.ENVIRONMENT }} \
+            --days 30 \
+            --output ../../sustainability-reports/utilization_analysis.json
+            
+      - name: Check for Sustainable Practices
+        run: |
+          # Validate if the infrastructure follows sustainable practices
+          cd modules/testing/sustainability_testing
+          python check_sustainable_practices.py \
+            --environment ${{ env.ENVIRONMENT }} \
+            --output ../../sustainability-reports/sustainable_practices.json
+            
+      - name: Analyze Instance Types
+        run: |
+          # Analyze if instance types are energy-efficient
+          cd modules/testing/sustainability_testing
+          python analyze_instance_types.py \
+            --environment ${{ env.ENVIRONMENT }} \
+            --output ../../sustainability-reports/instance_type_analysis.json
+            
+      - name: Generate Sustainability Report
+        run: |
+          cat > sustainability-reports/sustainability-report.md << EOF
+          # Sustainability Report
+          
+          **Environment:** ${{ env.ENVIRONMENT }}
+          **Date:** $(date)
+          
+          ## Carbon Footprint Analysis
+          
+          See carbon-footprint.json for detailed analysis of the estimated carbon footprint.
+          
+          ## Resource Utilization
+          
+          This analysis evaluates how efficiently resources are utilized over time.
+          See utilization_analysis.json for detailed metrics.
+          
+          ## Sustainable Practices Assessment
+          
+          This assessment checks if the infrastructure follows sustainable AWS practices.
+          See sustainable_practices.json for detailed findings.
+          
+          ## Instance Type Efficiency
+          
+          This analysis identifies opportunities to use more energy-efficient instance types.
+          See instance_type_analysis.json for detailed recommendations.
+          
+          ## Sustainability Score
+          
+          Based on the analyses, the infrastructure receives the following sustainability ratings:
+          
+          - Carbon efficiency: [TBD from analysis]
+          - Resource utilization: [TBD from analysis]
+          - Sustainable practices: [TBD from analysis]
+          - Instance efficiency: [TBD from analysis]
+          
+          ## Recommendations
+          
+          1. [To be generated from analysis results]
+          2. [To be generated from analysis results]
+          3. [To be generated from analysis results]
+          
+          EOF
+          
+      - name: Upload Sustainability Reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: sustainability-reports
+          path: sustainability-reports/
+          retention-days: 30
