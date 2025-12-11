@@ -152,7 +152,7 @@ jobs:
           cat dr-test-report.txt
       
       - name: Upload DR Test Report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: dr-test-report
           path: dr-test-report.txt

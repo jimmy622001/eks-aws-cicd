@@ -109,7 +109,7 @@ jobs:
       
       - name: Upload Compliance Reports
         if: ${{ github.event.inputs.generate_report != 'false' }}
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: compliance-reports
           path: compliance-reports/
