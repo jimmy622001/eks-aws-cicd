@@ -1,4 +1,4 @@
-FROM nginx:1.29.3-alpine3.22-slim
+FROM nginx:1.29.4-alpine3.23-slim
 
 COPY index.html /usr/share/nginx/html/
 COPY app.js /usr/share/nginx/html/
