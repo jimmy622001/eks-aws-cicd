@@ -56,6 +56,12 @@ jobs:
         run: |
           pip install detect-secrets tfsec-python checkov
           npm install -g snyk
+      
+      - name: Authenticate Snyk
+        run: snyk auth ${{ secrets.SNYK_TOKEN }}
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        continue-on-error: true
           
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v1
@@ -78,6 +84,29 @@ jobs:
           tfsec . --format json > security-reports/tfsec-report.json
           tfsec . --format markdown > security-reports/tfsec-report.md
           echo "TFSec scan complete"
+      
+      - name: Run Snyk Docker Scan
+        id: snyk-docker
+        continue-on-error: true
+        run: |
+          cd app
+          # Extract base image from Dockerfile
+          BASE_IMAGE=$(grep -i "^FROM" Dockerfile | head -n1 | awk '{print $2}')
+          echo "Scanning Docker base image: $BASE_IMAGE"
+      
+          # Scan base image
+          snyk container test $BASE_IMAGE --json > ../security-reports/snyk-container-report.json || true
+      
+          # Generate readable report
+          echo "## Docker Image Security Scan Results" > ../security-reports/snyk-container-report.md
+          echo "Base image scanned: $BASE_IMAGE" >> ../security-reports/snyk-container-report.md
+          echo "" >> ../security-reports/snyk-container-report.md
+          echo "### Vulnerabilities Found:" >> ../security-reports/snyk-container-report.md
+      
+          # Extract and format vulnerabilities
+          jq -r '.vulnerabilities[] | "- " + .title + " (" + .severity + ")\n  CVE: " + .identifiers.CVE[0] + "\n  Fixed in: " + (.fixedIn[0] // "Not yet fixed") + "\n"' ../security-reports/snyk-container-report.json >> ../security-reports/snyk-container-report.md || echo "No vulnerabilities found or report format error" >> ../security-reports/snyk-container-report.md
+      
+          cd ..
           
       - name: Run Security Lambda Test
         run: |
@@ -129,6 +158,10 @@ jobs:
           
           See the tfsec-report.md file for detailed findings.
           
+          ## Docker Image Security Issues
+          
+          See the snyk-container-report.md file for details on vulnerabilities found in the Docker base images.
+          
           ## Lambda Security Testing Results
           
           The Lambda security scanner tested the following services:
@@ -162,22 +195,42 @@ jobs:
           
       - name: Check High Severity Findings
         run: |
+          # Initialize exit code
+          exit_code=0
+      
           # This is a placeholder for checking high severity findings
           # In a real implementation, you would parse the reports and exit with code 1 if high severity issues are found
           echo "Checking for high severity findings..."
           
           # Example check for high severity findings in tfsec results
           if grep -q "HIGH" security-reports/tfsec-report.md; then
-            echo "::error::High severity security findings detected!"
-            exit 1
+            echo "::error::High severity security findings detected in infrastructure code!"
+            exit_code=1
+          fi
+          
+          # Check for high severity findings in Snyk container report
+          if grep -q "(high)" security-reports/snyk-container-report.md; then
+            echo "::error::High severity security findings detected in Docker images!"
+            exit_code=1
           fi
           
           # Check for medium severity findings if configured
           if [[ "${{ github.event.inputs.fail_on_medium }}" == "true" ]]; then
             if grep -q "MEDIUM" security-reports/tfsec-report.md; then
-              echo "::error::Medium severity security findings detected!"
-              exit 1
+              echo "::error::Medium severity security findings detected in infrastructure code!"
+              exit_code=1
+            fi
+          
+            if grep -q "(medium)" security-reports/snyk-container-report.md; then
+              echo "::error::Medium severity security findings detected in Docker images!"
+              exit_code=1
             fi
           fi
           
-          echo "No critical security issues found."
+          # Exit with stored exit code
+          if [ $exit_code -ne 0 ]; then
+            echo "Critical security issues found!"
+            exit $exit_code
+          else
+            echo "No critical security issues found."
+          fi
