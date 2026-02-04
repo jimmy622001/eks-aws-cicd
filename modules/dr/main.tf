@@ -36,6 +36,36 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
   role       = aws_iam_role.eks_cluster_role.name
 }
 
+# Add KMS policy for EKS cluster to encrypt/decrypt secrets
+resource "aws_iam_policy" "eks_kms_policy" {
+  provider    = aws.dr
+  name        = "${var.cluster_name}-kms-policy"
+  description = "Policy allowing EKS to use KMS key for secret encryption"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Effect   = "Allow"
+        Resource = aws_kms_key.eks_secrets_key.arn
+      },
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "eks_kms_policy_attachment" {
+  provider   = aws.dr
+  policy_arn = aws_iam_policy.eks_kms_policy.arn
+  role       = aws_iam_role.eks_cluster_role.name
+}
+
 # IAM Role for EKS Node Group
 resource "aws_iam_role" "eks_node_role" {
   provider = aws.dr
@@ -74,20 +104,49 @@ resource "aws_iam_role_policy_attachment" "eks_container_registry_read" {
   role       = aws_iam_role.eks_node_role.name
 }
 
+# KMS Key for EKS Cluster Secret Encryption
+resource "aws_kms_key" "eks_secrets_key" {
+  provider                = aws.dr
+  description             = "KMS key for EKS cluster secret encryption"
+  enable_key_rotation     = true
+  deletion_window_in_days = 7
+
+  tags = {
+    Name        = "${var.cluster_name}-secrets-key"
+    Environment = "dr"
+  }
+}
+
+resource "aws_kms_alias" "eks_secrets_key_alias" {
+  provider      = aws.dr
+  name          = "alias/${var.cluster_name}-secrets-key"
+  target_key_id = aws_kms_key.eks_secrets_key.key_id
+}
+
 # EKS Cluster for DR
 resource "aws_eks_cluster" "dr" {
   provider = aws.dr
   name     = var.cluster_name
   role_arn = aws_iam_role.eks_cluster_role.arn
-  
+
   vpc_config {
     subnet_ids = var.subnet_ids
+    endpoint_public_access = false
+    endpoint_private_access = true
   }
-  
+
+  # Add encryption configuration for EKS secrets
+  encryption_config {
+    provider {
+      key_arn = aws_kms_key.eks_secrets_key.arn
+    }
+    resources = ["secrets"]
+  }
+
   depends_on = [
     aws_iam_role_policy_attachment.eks_cluster_policy,
   ]
-  
+
   tags = {
     Environment = "dr"
   }
