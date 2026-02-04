@@ -117,10 +117,29 @@ resource "aws_kms_key" "eks_secrets_key" {
   }
 }
 
+# KMS Key for SNS Topic Encryption
+resource "aws_kms_key" "sns_encryption_key" {
+  provider                = aws.dr
+  description             = "KMS key for SNS topic encryption"
+  enable_key_rotation     = true
+  deletion_window_in_days = 7
+
+  tags = {
+    Name        = "dr-sns-encryption-key"
+    Environment = "dr"
+  }
+}
+
 resource "aws_kms_alias" "eks_secrets_key_alias" {
   provider      = aws.dr
   name          = "alias/${var.cluster_name}-secrets-key"
   target_key_id = aws_kms_key.eks_secrets_key.key_id
+}
+
+resource "aws_kms_alias" "sns_encryption_key_alias" {
+  provider      = aws.dr
+  name          = "alias/dr/sns-encryption"
+  target_key_id = aws_kms_key.sns_encryption_key.key_id
 }
 
 # EKS Cluster for DR
@@ -287,8 +306,14 @@ resource "aws_iam_role_policy_attachment" "lambda_route53_health_check" {
 
 # Create SNS topic for DR alerts
 resource "aws_sns_topic" "dr_alerts" {
-  provider  = aws.dr
-  name      = "dr-failover-alerts"
+  provider         = aws.dr
+  name             = "dr-failover-alerts"
+  kms_master_key_id = aws_kms_key.sns_encryption_key.arn
+
+  tags = {
+    Name        = "dr-failover-alerts"
+    Environment = "dr"
+  }
 }
 
 # Archive file for spot to on-demand converter Lambda
