@@ -357,7 +357,11 @@ resource "aws_lambda_function" "spot_to_ondemand" {
 
   filename = data.archive_file.spot_to_ondemand_zip.output_path
   source_code_hash = data.archive_file.spot_to_ondemand_zip.output_base64sha256
-
+  
+  tracing_config {
+    mode = "Active"
+  }
+  
   environment {
     variables = {
       CLUSTER_NAME     = aws_eks_cluster.dr.name
@@ -383,7 +387,11 @@ resource "aws_lambda_function" "failover_tester" {
 
   filename = data.archive_file.failover_tester_zip.output_path
   source_code_hash = data.archive_file.failover_tester_zip.output_base64sha256
-
+  
+  tracing_config {
+    mode = "Active"
+  }
+  
   environment {
     variables = {
       PRIMARY_ENDPOINT = var.primary_endpoint
