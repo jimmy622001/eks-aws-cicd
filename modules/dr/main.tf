@@ -36,36 +36,6 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
   role       = aws_iam_role.eks_cluster_role.name
 }
 
-# Add KMS policy for EKS cluster to encrypt/decrypt secrets
-resource "aws_iam_policy" "eks_kms_policy" {
-  provider    = aws.dr
-  name        = "${var.cluster_name}-kms-policy"
-  description = "Policy allowing EKS to use KMS key for secret encryption"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = [
-          "kms:Encrypt",
-          "kms:Decrypt",
-          "kms:ReEncrypt*",
-          "kms:GenerateDataKey*",
-          "kms:DescribeKey"
-        ]
-        Effect   = "Allow"
-        Resource = aws_kms_key.eks_secrets_key.arn
-      },
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "eks_kms_policy_attachment" {
-  provider   = aws.dr
-  policy_arn = aws_iam_policy.eks_kms_policy.arn
-  role       = aws_iam_role.eks_cluster_role.name
-}
-
 # IAM Role for EKS Node Group
 resource "aws_iam_role" "eks_node_role" {
   provider = aws.dr
@@ -104,28 +74,27 @@ resource "aws_iam_role_policy_attachment" "eks_container_registry_read" {
   role       = aws_iam_role.eks_node_role.name
 }
 
-# KMS Key for EKS Cluster Secret Encryption
-resource "aws_kms_key" "eks_secrets_key" {
-  provider                = aws.dr
-  description             = "KMS key for EKS cluster secret encryption"
-  enable_key_rotation     = true
-  deletion_window_in_days = 7
+# CloudWatch Log Group for EKS Control Plane Logging
+resource "aws_cloudwatch_log_group" "eks_logs" {
+  provider          = aws.dr
+  name              = "/aws/eks/${var.cluster_name}/cluster"
+  retention_in_days = 7
 
   tags = {
-    Name        = "${var.cluster_name}-secrets-key"
     Environment = "dr"
+    Name        = "${var.cluster_name}-logs"
   }
 }
 
-# KMS Key for SNS Topic Encryption
-resource "aws_kms_key" "sns_encryption_key" {
+# KMS key for EKS secrets encryption
+resource "aws_kms_key" "eks_secrets_key" {
   provider                = aws.dr
-  description             = "KMS key for SNS topic encryption"
-  enable_key_rotation     = true
+  description             = "KMS key for EKS cluster secrets encryption"
   deletion_window_in_days = 7
+  enable_key_rotation     = true
 
   tags = {
-    Name        = "dr-sns-encryption-key"
+    Name        = "${var.cluster_name}-secrets-key"
     Environment = "dr"
   }
 }
@@ -136,10 +105,34 @@ resource "aws_kms_alias" "eks_secrets_key_alias" {
   target_key_id = aws_kms_key.eks_secrets_key.key_id
 }
 
-resource "aws_kms_alias" "sns_encryption_key_alias" {
-  provider      = aws.dr
-  name          = "alias/dr/sns-encryption"
-  target_key_id = aws_kms_key.sns_encryption_key.key_id
+# Add KMS permissions to EKS cluster role
+resource "aws_iam_policy" "eks_kms_policy" {
+  provider    = aws.dr
+  name        = "${var.cluster_name}-kms-policy"
+  description = "Policy to allow EKS to use KMS key for secrets encryption"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Effect   = "Allow"
+        Resource = aws_kms_key.eks_secrets_key.arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "eks_kms_policy_attachment" {
+  provider   = aws.dr
+  policy_arn = aws_iam_policy.eks_kms_policy.arn
+  role       = aws_iam_role.eks_cluster_role.name
 }
 
 # EKS Cluster for DR
@@ -149,21 +142,25 @@ resource "aws_eks_cluster" "dr" {
   role_arn = aws_iam_role.eks_cluster_role.arn
 
   vpc_config {
-    subnet_ids = var.subnet_ids
-    endpoint_public_access = false
+    subnet_ids             = var.subnet_ids
+    endpoint_public_access  = false
     endpoint_private_access = true
   }
 
-  # Add encryption configuration for EKS secrets
   encryption_config {
+    resources = ["secrets"]
     provider {
       key_arn = aws_kms_key.eks_secrets_key.arn
     }
-    resources = ["secrets"]
   }
+
+  # Enable control plane logging for all log types as recommended by Snyk
+  enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
 
   depends_on = [
     aws_iam_role_policy_attachment.eks_cluster_policy,
+    aws_iam_role_policy_attachment.eks_kms_policy_attachment,
+    aws_cloudwatch_log_group.eks_logs,
   ]
 
   tags = {
@@ -304,15 +301,34 @@ resource "aws_iam_role_policy_attachment" "lambda_route53_health_check" {
   role       = aws_iam_role.lambda_failover_role.name
 }
 
+# KMS key for SNS encryption
+resource "aws_kms_key" "sns_encryption_key" {
+  provider                = aws.dr
+  description             = "KMS key for SNS topic encryption"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  tags = {
+    Name        = "${var.cluster_name}-sns-key"
+    Environment = "dr"
+  }
+}
+
+resource "aws_kms_alias" "sns_encryption_key_alias" {
+  provider      = aws.dr
+  name          = "alias/dr/sns-encryption"
+  target_key_id = aws_kms_key.sns_encryption_key.key_id
+}
+
 # Create SNS topic for DR alerts
 resource "aws_sns_topic" "dr_alerts" {
-  provider         = aws.dr
-  name             = "dr-failover-alerts"
+  provider          = aws.dr
+  name              = "dr-failover-alerts"
   kms_master_key_id = aws_kms_key.sns_encryption_key.arn
 
   tags = {
-    Name        = "dr-failover-alerts"
     Environment = "dr"
+    Name        = "dr-alerts"
   }
 }
 
