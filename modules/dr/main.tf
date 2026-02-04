@@ -74,6 +74,55 @@ resource "aws_iam_role_policy_attachment" "eks_container_registry_read" {
   role       = aws_iam_role.eks_node_role.name
 }
 
+# KMS key for EKS secrets encryption
+resource "aws_kms_key" "eks_secrets_key" {
+  provider                = aws.dr
+  description             = "KMS key for EKS cluster secrets encryption"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+  
+  tags = {
+    Name        = "${var.cluster_name}-secrets-key"
+    Environment = "dr"
+  }
+}
+
+resource "aws_kms_alias" "eks_secrets_key_alias" {
+  provider      = aws.dr
+  name          = "alias/${var.cluster_name}-secrets-key"
+  target_key_id = aws_kms_key.eks_secrets_key.key_id
+}
+
+# Add KMS permissions to EKS cluster role
+resource "aws_iam_policy" "eks_kms_policy" {
+  provider    = aws.dr
+  name        = "${var.cluster_name}-kms-policy"
+  description = "Policy to allow EKS to use KMS key for secrets encryption"
+  
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Effect   = "Allow"
+        Resource = aws_kms_key.eks_secrets_key.arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "eks_kms_policy_attachment" {
+  provider   = aws.dr
+  policy_arn = aws_iam_policy.eks_kms_policy.arn
+  role       = aws_iam_role.eks_cluster_role.name
+}
+
 # EKS Cluster for DR
 resource "aws_eks_cluster" "dr" {
   provider = aws.dr
@@ -81,11 +130,21 @@ resource "aws_eks_cluster" "dr" {
   role_arn = aws_iam_role.eks_cluster_role.arn
   
   vpc_config {
-    subnet_ids = var.subnet_ids
+    subnet_ids             = var.subnet_ids
+    endpoint_public_access  = false
+    endpoint_private_access = true
+  }
+  
+  encryption_config {
+    resources = ["secrets"]
+    provider {
+      key_arn = aws_kms_key.eks_secrets_key.arn
+    }
   }
   
   depends_on = [
     aws_iam_role_policy_attachment.eks_cluster_policy,
+    aws_iam_role_policy_attachment.eks_kms_policy_attachment,
   ]
   
   tags = {
