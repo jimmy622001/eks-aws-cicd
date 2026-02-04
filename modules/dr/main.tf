@@ -74,6 +74,18 @@ resource "aws_iam_role_policy_attachment" "eks_container_registry_read" {
   role       = aws_iam_role.eks_node_role.name
 }
 
+# CloudWatch Log Group for EKS Control Plane Logging
+resource "aws_cloudwatch_log_group" "eks_logs" {
+  provider          = aws.dr
+  name              = "/aws/eks/${var.cluster_name}/cluster"
+  retention_in_days = 7
+
+  tags = {
+    Environment = "dr"
+    Name        = "${var.cluster_name}-logs"
+  }
+}
+
 # KMS key for EKS secrets encryption
 resource "aws_kms_key" "eks_secrets_key" {
   provider                = aws.dr
@@ -142,9 +154,13 @@ resource "aws_eks_cluster" "dr" {
     }
   }
 
+  # Enable control plane logging for all log types as recommended by Snyk
+  enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+
   depends_on = [
     aws_iam_role_policy_attachment.eks_cluster_policy,
     aws_iam_role_policy_attachment.eks_kms_policy_attachment,
+    aws_cloudwatch_log_group.eks_logs,
   ]
 
   tags = {
