@@ -130,3 +130,24 @@ variable "tags" {
   description = "Tags to apply to all resources"
   type        = map(string)
 }
+
+variable "owner" {
+  description = "Owner of the resources"
+  type        = string
+}
+
+variable "cost_center" {
+  description = "Cost center for billing"
+  type        = string
+}
+
+variable "alert_email" {
+  description = "Email for budget alerts"
+  type        = string
+}
+
+variable "monthly_budget_limit" {
+  description = "Monthly budget limit in USD"
+  type        = string
+  default     = "1000"
+}

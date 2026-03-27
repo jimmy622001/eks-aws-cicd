@@ -50,10 +50,28 @@ Key Components
      - Grafana for visualization and alerts
      - Rancher for cluster management and observability
    * **Health Checks**: Route 53 health monitoring for critical endpoints
-6. **Content Delivery**
+   * **CloudWatch Alarms**: Automated alerts for high CPU/memory utilization
+6. **Cost Optimization**
 
-   * **CloudFront Distribution**: Global content delivery and caching
-   * **Load Balancing**: Application Load Balancers for traffic management
+   * **AWS Budgets**: Monthly cost monitoring with alerts at 80% and 100% thresholds
+   * **Cost Allocation Tags**: Automated tagging for cost tracking
+   * **Spot Instances**: Cost-effective compute in DR environment
+7. **Sustainability**
+
+   * **Energy-Efficient Instances**: Use of AMD-based t3 instances for lower power consumption
+   * **Resource Utilization Monitoring**: CloudWatch alarms to prevent over-provisioning
+8. **Reliability Enhancements**
+
+   * **Automated Backups**: Daily EKS cluster backups with 30-day retention
+   * **AWS Backup Service**: Centralized backup management
+9. **Performance Efficiency**
+
+   * **Auto Scaling Policies**: Target tracking scaling based on CPU utilization
+   * **Dynamic Resource Allocation**: Jenkins agents scale based on build demand
+10. **Content Delivery**
+
+    * **CloudFront Distribution**: Global content delivery and caching
+    * **Load Balancing**: Application Load Balancers for traffic management
 
 ## Logical Architecture
 

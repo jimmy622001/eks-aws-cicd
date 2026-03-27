@@ -27,3 +27,13 @@ output "oidc_provider_arn" {
   description = "The ARN of the OIDC Provider for IRSA"
   value       = aws_iam_openid_connect_provider.main.arn
 }
+
+output "cluster_arn" {
+  description = "EKS cluster ARN"
+  value       = aws_eks_cluster.main.arn
+}
+
+output "node_group_autoscaling_group_name" {
+  description = "Name of the autoscaling group for the node group"
+  value       = aws_eks_node_group.main.resources[0].autoscaling_groups[0].name
+}

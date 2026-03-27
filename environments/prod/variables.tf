@@ -146,3 +146,24 @@ variable "failover_threshold" {
   type        = number
   default     = 3
 }
+
+variable "owner" {
+  description = "Owner of the resources"
+  type        = string
+}
+
+variable "cost_center" {
+  description = "Cost center for billing"
+  type        = string
+}
+
+variable "alert_email" {
+  description = "Email for budget alerts"
+  type        = string
+}
+
+variable "monthly_budget_limit" {
+  description = "Monthly budget limit in USD"
+  type        = string
+  default     = "5000"
+}
