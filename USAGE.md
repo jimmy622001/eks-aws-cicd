@@ -77,7 +77,24 @@ The project requires a registered domain for CloudFront and Route53 configuratio
 2. Update `domain_name` variable in each environment's `terraform.tfvars` file
 3. Ensure the Route53 hosted zone exists for your domain
 
-### 4. SSH Key Pair Creation
+### 4. Cost and Sustainability Configuration
+
+Configure the following variables in each environment's `terraform.tfvars` file:
+
+```hcl
+# Cost and Sustainability Configuration
+owner                = "Your Team Name"
+cost_center          = "Your Cost Center"
+alert_email          = "alerts@yourcompany.com"
+monthly_budget_limit = "1000"  # Adjust based on environment
+```
+
+These settings enable:
+- **Cost Monitoring**: AWS Budgets with email alerts at 80% and 100% of budget
+- **Resource Tagging**: Automatic cost allocation tags on all resources
+- **Sustainability**: CloudWatch alarms for high resource utilization
+
+### 5. SSH Key Pair Creation
 
 ```bash
 aws ec2 create-key-pair --key-name eks-jenkins-key --query 'KeyMaterial' --output text > eks-jenkins-key.pem
