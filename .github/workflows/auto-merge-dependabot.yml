@@ -1,0 +1,62 @@
+name: Auto-merge Dependabot PRs
+
+on:
+  pull_request:
+    branches: [ main, dev ]
+  
+  # Allow manual triggering
+  workflow_dispatch:
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up dependencies
+        run: |
+          pip install detect-secrets tfsec-python checkov
+          npm install -g snyk
+      
+      - name: Run security tests on changes
+        id: security-test
+        continue-on-error: true
+        run: |
+          # Run basic security tests on the changes
+          files_changed=$(git diff --name-only origin/main...HEAD)
+          
+          # Check Terraform files
+          if echo "$files_changed" | grep -q "\.tf$"; then
+            tfsec .
+          fi
+          
+          # Check Docker files
+          if echo "$files_changed" | grep -q "Dockerfile"; then
+            docker_files=$(echo "$files_changed" | grep "Dockerfile")
+            for file in $docker_files; do
+              snyk container test $(grep -i "FROM" $file | head -n1 | awk '{print $2}') --file=$file || echo "Vulnerability found but continuing"
+            done
+          fi
+          
+          # Run detect-secrets on all changed files
+          detect-secrets scan $(git diff --name-only origin/main...HEAD)
+      
+      - name: Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v1
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+          
+      - name: Enable auto-merge for Dependabot PRs
+        if: |
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' || 
+          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+        run: |
+          gh pr review --approve "$PR_URL"
+          gh pr merge --auto --merge "$PR_URL"
+        env:
+          PR_URL: ${{github.event.pull_request.html_url}}
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}

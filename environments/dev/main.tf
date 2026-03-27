@@ -1,5 +1,14 @@
 provider "aws" {
   region = var.region
+
+  default_tags {
+    tags = {
+      Project     = var.project
+      Environment = var.environment
+      Owner       = var.owner
+      CostCenter  = var.cost_center
+    }
+  }
 }
 
 terraform {
@@ -59,13 +68,13 @@ module "eks" {
 
 # Data source to get EKS cluster info
 data "aws_eks_cluster" "eks" {
-  name = module.eks.cluster_name
+  name       = module.eks.cluster_name
   depends_on = [module.eks]
 }
 
 # Data source for auth info
 data "aws_eks_cluster_auth" "eks" {
-  name = module.eks.cluster_name
+  name       = module.eks.cluster_name
   depends_on = [module.eks]
 }
 
@@ -131,4 +140,132 @@ module "cdn" {
   alb_domains         = ["${module.eks.cluster_name}.${var.region}.elb.amazonaws.com"]
   acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/example" # Replace with actual ARN
   tags                = var.tags
+}
+
+# Cost Optimization - AWS Budget
+resource "aws_budgets_budget" "monthly" {
+  name         = "${var.project}-${var.environment}-monthly-budget"
+  budget_type  = "COST"
+  limit_amount = var.monthly_budget_limit
+  limit_unit   = "USD"
+  time_unit    = "MONTHLY"
+
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 80
+    threshold_type            = "PERCENTAGE"
+    notification_type         = "ACTUAL"
+    subscriber_email_addresses = [var.alert_email]
+  }
+
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 100
+    threshold_type            = "PERCENTAGE"
+    notification_type         = "ACTUAL"
+    subscriber_email_addresses = [var.alert_email]
+  }
+}
+
+# SNS Topic for alerts
+resource "aws_sns_topic" "alerts" {
+  name = "${var.project}-${var.environment}-alerts"
+}
+
+resource "aws_sns_topic_subscription" "alerts_email" {
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
+}
+
+# Sustainability - CloudWatch alarms for resource utilization
+resource "aws_cloudwatch_metric_alarm" "high_cpu" {
+  alarm_name          = "${var.project}-${var.environment}-high-cpu"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = "300"
+  statistic           = "Average"
+  threshold           = "80"
+  
+  alarm_actions = [aws_sns_topic.alerts.arn]
+}
+
+resource "aws_cloudwatch_metric_alarm" "high_memory" {
+  alarm_name          = "${var.project}-${var.environment}-high-memory"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "mem_used_percent"
+  namespace           = "CWAgent"
+  period              = "300"
+  statistic           = "Average"
+  threshold           = "80"
+  
+  alarm_actions = [aws_sns_topic.alerts.arn]
+}
+
+# Reliability - AWS Backup
+resource "aws_backup_vault" "eks_backup" {
+  name = "${var.project}-${var.environment}-backup-vault"
+}
+
+resource "aws_backup_plan" "eks_backup" {
+  name = "${var.project}-${var.environment}-backup-plan"
+
+  rule {
+    rule_name         = "daily_backups"
+    target_vault_name = aws_backup_vault.eks_backup.name
+    schedule          = "cron(0 5 ? * * *)"  # Daily at 5 AM
+    
+    lifecycle {
+      delete_after = 30
+    }
+  }
+}
+
+resource "aws_iam_role" "backup_role" {
+  name = "${var.project}-${var.environment}-backup-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "backup.amazonaws.com"
+        }
+      },
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "backup_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup"
+  role       = aws_iam_role.backup_role.name
+}
+
+resource "aws_backup_selection" "eks_selection" {
+  iam_role_arn = aws_iam_role.backup_role.arn
+  name         = "${var.project}-${var.environment}-backup-selection"
+  plan_id      = aws_backup_plan.eks_backup.id
+
+  resources = [
+    module.eks.cluster_arn
+  ]
+}
+
+# Performance Efficiency - Auto Scaling Policy
+resource "aws_autoscaling_policy" "cpu_scaling" {
+  name                   = "${var.project}-${var.environment}-cpu-scaling"
+  autoscaling_group_name = module.eks.node_group_autoscaling_group_name
+  policy_type           = "TargetTrackingScaling"
+  
+  target_tracking_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = "ASGAverageCPUUtilization"
+    }
+    target_value = 70.0
+  }
 }
